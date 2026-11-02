@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import {
   Download,
+  FileSpreadsheet,
   FolderTree,
   HardDrive,
   Plus,
   RotateCcw,
   Scale,
+  Upload,
 } from 'lucide-react';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
@@ -30,6 +32,7 @@ import { CategoryRecord } from '../../../warehouse/domain/entities/CategoryRecor
 import { MeasurementUnitRecord } from '../../../warehouse/domain/entities/MeasurementUnitRecord';
 import { CreateCategoryModal } from '../../../warehouse/presentation/components/CreateCategoryModal';
 import { CreateMeasurementUnitModal } from '../../../warehouse/presentation/components/CreateMeasurementUnitModal';
+import { ExcelImportModal } from '../../../warehouse/presentation/components/ExcelImportModal';
 
 const MODULE_LABELS: Record<OperationModule, string> = {
   [OperationModule.CORE]: 'Sistema',
@@ -48,6 +51,8 @@ export function SettingsPage() {
   } | null>(null);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState<boolean>(false);
   const [isRestoreModalOpen, setIsRestoreModalOpen] = useState<boolean>(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -153,6 +158,34 @@ export function SettingsPage() {
       });
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setFeedbackMessage(null);
+    setIsExportingExcel(true);
+    try {
+      const allProducts = await useCases.warehouse.listProducts.execute(actor);
+      const { fileName, rowCount } = useCases.warehouse.excelInventory.exportToExcel(
+        actor,
+        allProducts
+      );
+      setFeedbackMessage({
+        tone: 'success',
+        text: `Catálogo de inventario exportado exitosamente a Excel (${fileName}) con ${rowCount} productos.`,
+      });
+      notifyDataChanged();
+      await reloadHistory();
+    } catch (err) {
+      setFeedbackMessage({
+        tone: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'No fue posible exportar el catálogo de inventario a Excel.',
+      });
+    } finally {
+      setIsExportingExcel(false);
     }
   };
 
@@ -410,33 +443,85 @@ export function SettingsPage() {
       {/* 2. Protección de datos locales y copias de seguridad */}
       <Card>
         <CardHeader
-          title="Persistencia local y copias de seguridad"
-          description="Respaldo transaccional y verificación de integridad sobre IndexedDB local."
-          action={
-            can(Permission.MANAGE_BACKUPS) && (
-              <div className="flex items-center gap-2.5">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<RotateCcw className="h-3.5 w-3.5" />}
-                  onClick={handleOpenRestoreModal}
-                >
-                  Restaurar respaldo
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={<Download className="h-3.5 w-3.5" />}
-                  disabled={isExporting}
-                  onClick={() => void handleExportBackup()}
-                >
-                  {isExporting ? 'Exportando…' : 'Exportar copia de seguridad'}
-                </Button>
-              </div>
-            )
-          }
+          title="Copias de seguridad y transferencia de datos"
+          description="Exportación e importación de catálogo en Excel (.xlsx) y respaldos completos del sistema."
         />
-        <CardBody className="space-y-4">
+        <CardBody className="space-y-5">
+          {/* Panel destacado para Excel (.xlsx) */}
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-700" />
+                  <h3 className="text-xs font-semibold text-slate-900">
+                    Catálogo de Inventario en Excel (.xlsx)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                  Descargue o cargue la información completa de inventario (código/SKU, producto, categoría, unidad de medida, existencias, último costo, margen %, precio de venta, disponibilidad y estado). Ideal para editar en Excel o migrar su lista de productos de una PC a otra sin empezar desde cero.
+                </p>
+              </div>
+              {can(Permission.MANAGE_BACKUPS) && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Upload className="h-3.5 w-3.5 text-slate-600" />}
+                    onClick={() => setIsExcelImportModalOpen(true)}
+                  >
+                    Subir Excel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    disabled={isExportingExcel}
+                    onClick={() => void handleExportExcel()}
+                  >
+                    {isExportingExcel ? 'Generando Excel…' : 'Descargar Excel'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Panel técnico para JSON */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="h-4 w-4 text-[#287C99]" />
+                  <h3 className="text-xs font-semibold text-slate-900">
+                    Respaldo integral del sistema (Archivo JSON)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                  Guarda una copia exacta de todo el sistema (además de los productos, incluye todo el historial de ventas, jornadas cerradas, cuentas abiertas, cortes y auditoría). No es un archivo para abrir o editar a mano, sino una cápsula de recuperación total protegida con PIN administrativo.
+                </p>
+              </div>
+              {can(Permission.MANAGE_BACKUPS) && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<RotateCcw className="h-3.5 w-3.5 text-slate-600" />}
+                    onClick={handleOpenRestoreModal}
+                  >
+                    Restaurar JSON
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    disabled={isExporting}
+                    onClick={() => void handleExportBackup()}
+                  >
+                    {isExporting ? 'Exportando…' : 'Descargar JSON'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
             <span className="inline-flex items-center gap-1.5 font-medium text-[#123F55]">
               <HardDrive className="h-3.5 w-3.5 text-[#287C99]" />
@@ -698,6 +783,24 @@ export function SettingsPage() {
           });
           void reloadUnits();
           void reloadStatus();
+        }}
+      />
+
+      {/* Modal de Importación de Inventario Excel */}
+      <ExcelImportModal
+        isOpen={isExcelImportModalOpen}
+        onClose={() => setIsExcelImportModalOpen(false)}
+        onImport={(file) => useCases.warehouse.excelInventory.importFromExcel(actor, file)}
+        onCompleted={() => {
+          setFeedbackMessage({
+            tone: 'success',
+            text: 'Catálogo de inventario importado exitosamente desde Excel.',
+          });
+          notifyDataChanged();
+          void reloadStatus();
+          void reloadHistory();
+          void reloadCategories();
+          void reloadUnits();
         }}
       />
     </div>

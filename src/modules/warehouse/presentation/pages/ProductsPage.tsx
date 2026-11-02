@@ -4,6 +4,8 @@ import {
   ChevronRight,
   CheckCircle2,
   DollarSign,
+  Download,
+  FileSpreadsheet,
   History,
   MoreVertical,
   Package,
@@ -14,6 +16,7 @@ import {
   PowerOff,
   Search,
   SlidersHorizontal,
+  Upload,
 } from 'lucide-react';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
@@ -37,6 +40,7 @@ import { EditProductSalePriceModal } from '../components/EditProductSalePriceMod
 import { NewProductEntryModal } from '../components/NewProductEntryModal';
 import { ProductStatusChangeModal } from '../components/ProductStatusChangeModal';
 import { RegisterMerchandiseEntryModal } from '../components/RegisterMerchandiseEntryModal';
+import { ExcelImportModal } from '../components/ExcelImportModal';
 
 const ITEMS_PER_PAGE = 25;
 
@@ -55,6 +59,9 @@ export function ProductsPage() {
     product: ProductCatalogViewItem;
     targetStatus: ProductStatus;
   } | null>(null);
+
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState<boolean>(false);
 
   const [activeMenuProductId, setActiveMenuProductId] = useState<string | null>(null);
   const menuContainerRef = useRef<HTMLDivElement | null>(null);
@@ -155,6 +162,31 @@ export function ProductsPage() {
     setSuccessBanner(message);
     notifyDataChanged();
     void reload();
+  };
+
+  const handleExportExcel = () => {
+    if (!products || products.length === 0) {
+      setSuccessBanner('No hay productos disponibles para exportar.');
+      return;
+    }
+    setIsExportingExcel(true);
+    try {
+      const { fileName, rowCount } = useCases.warehouse.excelInventory.exportToExcel(
+        actor,
+        products
+      );
+      setSuccessBanner(
+        `Catálogo de inventario exportado exitosamente a Excel (${fileName}) con ${rowCount} productos.`
+      );
+    } catch (err) {
+      setSuccessBanner(
+        err instanceof Error
+          ? err.message
+          : 'Ocurrió un error al exportar el inventario a Excel.'
+      );
+    } finally {
+      setIsExportingExcel(false);
+    }
   };
 
   const columns = useMemo<readonly TableColumn<ProductCatalogViewItem>[]>(() => {
@@ -515,16 +547,37 @@ export function ProductsPage() {
             : 'Consulta de productos autorizada para operaciones en mostrador.'
         }
         actions={
-          canManageProducts ? (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
-              variant="primary"
+              variant="secondary"
               size="md"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => setIsNewEntryModalOpen(true)}
+              icon={<FileSpreadsheet className="h-4 w-4" />}
+              onClick={handleExportExcel}
+              disabled={isExportingExcel || !products || products.length === 0}
             >
-              + Nueva Mercancía
+              {isExportingExcel ? 'Exportando…' : 'Exportar Excel'}
             </Button>
-          ) : undefined
+            {canManageProducts && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  icon={<Upload className="h-4 w-4" />}
+                  onClick={() => setIsExcelImportModalOpen(true)}
+                >
+                  Importar Excel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  icon={<Plus className="h-4 w-4" />}
+                  onClick={() => setIsNewEntryModalOpen(true)}
+                >
+                  + Nueva Mercancía
+                </Button>
+              </>
+            )}
+          </div>
         }
       />
 
@@ -687,6 +740,20 @@ export function ProductsPage() {
           product={selectedProductForStockCorrection}
           onClose={() => setSelectedProductForStockCorrection(null)}
           onSuccess={handleStockCorrected}
+        />
+      )}
+
+      {/* Modal 6: Importación masiva de inventario desde Excel */}
+      {canManageProducts && (
+        <ExcelImportModal
+          isOpen={isExcelImportModalOpen}
+          onClose={() => setIsExcelImportModalOpen(false)}
+          onImport={(file) => useCases.warehouse.excelInventory.importFromExcel(actor, file)}
+          onCompleted={() => {
+            setSuccessBanner('Inventario sincronizado e importado exitosamente desde Excel.');
+            notifyDataChanged();
+            void reload();
+          }}
         />
       )}
     </div>

@@ -57,6 +57,7 @@ import { ResumeWorkdayClosingUseCase } from '../../modules/warehouse/application
 import { ApproveWorkdayClosingUseCase } from '../../modules/warehouse/application/ApproveWorkdayClosingUseCase';
 import { RectifyWorkdayClosingUseCase } from '../../modules/warehouse/application/RectifyWorkdayClosingUseCase';
 import { MorningStockVerificationUseCase } from '../../modules/warehouse/application/MorningStockVerificationUseCase';
+import { ExcelInventoryService } from '../../modules/warehouse/application/ExcelInventoryService';
 import { UpdateProductSalePriceUseCase } from '../../modules/warehouse/application/UpdateProductSalePriceUseCase';
 import { IndexedDbCategoryRepository } from '../../modules/warehouse/infrastructure/IndexedDbCategoryRepository';
 import { IndexedDbCommercialActivityAdapter } from '../../modules/warehouse/infrastructure/IndexedDbCommercialActivityAdapter';
@@ -121,6 +122,7 @@ export interface ApplicationUseCases {
     readonly approveWorkdayClosing: ApproveWorkdayClosingUseCase;
     readonly rectifyWorkdayClosing: RectifyWorkdayClosingUseCase;
     readonly morningStockVerification: MorningStockVerificationUseCase;
+    readonly excelInventory: ExcelInventoryService;
   };
   readonly sales: {
     readonly getOpenSales: GetOpenSalesUseCase;
@@ -252,6 +254,7 @@ export function ApplicationProvider({
         approveWorkdayClosing: new ApproveWorkdayClosingUseCase(engine),
         rectifyWorkdayClosing: new RectifyWorkdayClosingUseCase(engine),
         morningStockVerification: new MorningStockVerificationUseCase(engine),
+        excelInventory: new ExcelInventoryService(engine),
       },
       sales: {
         getOpenSales: new GetOpenSalesUseCase(saleRepo),
