@@ -245,7 +245,14 @@ export function WorkdayDetailPage({ workdayId }: WorkdayDetailPageProps) {
       header: 'Cuenta / Folio',
       render: (s) => (
         <div>
-          <span className="font-semibold text-[#123F55]">{s.displayLabel}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-[#123F55]">{s.displayLabel}</span>
+            {s.isPriorWorkdayAccount && (
+              <span className="text-[10px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.5 rounded border border-amber-300">
+                Mesa de jornada previa {s.priorWorkdayCode ? `(${s.priorWorkdayCode})` : ''}
+              </span>
+            )}
+          </div>
           <div className="text-[11px] text-slate-500">
             {s.originType === 'DIRECT_DISPATCH' ? 'Despacho directo' : 'Cuenta abierta'}
           </div>
@@ -764,6 +771,61 @@ export function WorkdayDetailPage({ workdayId }: WorkdayDetailPageProps) {
             </div>
           </Card>
         </div>
+
+        {/* Resumen de Cuentas / Mesas Abiertas */}
+        {dossier.openAccountsStockBreakdown && dossier.openAccountsStockBreakdown.length > 0 && (
+          <Card>
+            <CardHeader
+              title={`Mercancía en Cuentas Abiertas (${dossier.openAccountsCount ?? 0} cuenta(s) en curso)`}
+              description="Productos ya descontados físicamente del almacén. No forman parte del dinero de ventas de la jornada hasta ser despachados o liquidados manualmente."
+            />
+            <div className="p-6 pt-0 space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-3">
+                  <span className="text-slate-600 block text-[11px]">Unidades en mesas/cuentas:</span>
+                  <span className="text-lg font-bold font-mono text-amber-900">
+                    {dossier.openAccountsTotalUnits ?? 0} unidades
+                  </span>
+                </div>
+                <div className="rounded-lg bg-blue-50 border border-blue-200 p-3">
+                  <span className="text-slate-600 block text-[11px]">Valor comercial pendiente de liquidar:</span>
+                  <span className="text-lg font-bold font-mono text-blue-900">
+                    {formatCurrency(dossier.openAccountsTotalValue ?? 0)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded border border-slate-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="p-2.5">Producto</th>
+                      <th className="p-2.5 text-right">Cantidad en Mesas</th>
+                      <th className="p-2.5 text-right">Importe Valorizado</th>
+                      <th className="p-2.5 text-right">Mesas</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {dossier.openAccountsStockBreakdown.map((item) => (
+                      <tr key={item.productId} className="hover:bg-slate-50">
+                        <td className="p-2.5 font-medium text-slate-900">{item.productName}</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-slate-800">
+                          {item.quantity} {item.unitName}
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-semibold text-emerald-700">
+                          {formatCurrency(item.totalValue)}
+                        </td>
+                        <td className="p-2.5 text-right text-slate-500 font-mono">
+                          {item.accountCount}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
     )}
 

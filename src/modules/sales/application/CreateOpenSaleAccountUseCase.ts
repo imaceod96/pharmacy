@@ -6,6 +6,10 @@ import { TransactionManager } from '../../../shared/types/repository';
 import { nowISO } from '../../../shared/utils/date';
 import { generateEntityId } from '../../../shared/utils/id';
 import { OperationLogEntry, OperationModule } from '../../core/domain/entities/OperationLog';
+import {
+  InventoryMovementRecord,
+  InventoryMovementType,
+} from '../../warehouse/domain/entities/InventoryMovementRecord';
 import { MeasurementUnitRecord } from '../../warehouse/domain/entities/MeasurementUnitRecord';
 import { ProductRecord, ProductStatus } from '../../warehouse/domain/entities/ProductRecord';
 import {
@@ -75,6 +79,7 @@ export class CreateOpenSaleAccountUseCase {
         StoreName.WAREHOUSE_WORKDAYS,
         StoreName.WAREHOUSE_PRODUCTS,
         StoreName.WAREHOUSE_UNITS,
+        StoreName.WAREHOUSE_INVENTORY_MOVEMENTS,
         StoreName.SALES_RECORDS,
         StoreName.SYSTEM_METADATA,
         StoreName.OPERATION_HISTORY,
@@ -199,7 +204,47 @@ export class CreateOpenSaleAccountUseCase {
 
         const folio = formatOpenAccountConsecutive(nextConsecutive);
 
-        // 5. Persistir cuenta abierta (SIN descontar existencias ni crear movimientos en Kardex)
+        // 5. Descontar existencias físicas en almacén y registrar movimientos de Kardex para las partidas de la cuenta
+        const inventoryMovementIds: string[] = [];
+
+        for (const draftLine of consolidatedLines) {
+          const product = await tx.get<ProductRecord>(
+            StoreName.WAREHOUSE_PRODUCTS,
+            draftLine.productId
+          );
+          if (!product) continue;
+
+          const previousStock = product.currentStock;
+          const resultingStock = Math.round((previousStock - draftLine.quantity) * 1000) / 1000;
+
+          await tx.upsert<ProductRecord>(StoreName.WAREHOUSE_PRODUCTS, {
+            ...product,
+            currentStock: resultingStock,
+            updatedAt: timestamp,
+          });
+
+          const movementId = generateEntityId();
+          const movement: InventoryMovementRecord = {
+            id: movementId,
+            productId: product.id,
+            movementType: InventoryMovementType.SALE,
+            quantity: draftLine.quantity,
+            signedQuantity: -draftLine.quantity,
+            previousStock,
+            resultingStock,
+            timestamp,
+            responsibleUserId: actor.role,
+            originOperationId: saleId,
+            reason: `Consumo en cuenta abierta ${folio} (${accountName})`,
+            workdayId: workday.id,
+            workdayFolio: workday.code,
+          };
+
+          await tx.insert(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS, movement);
+          inventoryMovementIds.push(movementId);
+        }
+
+        // 6. Persistir cuenta abierta (con existencias descontadas físicamente)
         const saleRecord: SaleRecord = {
           id: saleId,
           folio,
@@ -224,8 +269,8 @@ export class CreateOpenSaleAccountUseCase {
           cancelledByUserId: null,
           cancelledByUserLabel: null,
           cancellationReason: null,
-          hasStockMovement: false,
-          inventoryMovementIds: [],
+          hasStockMovement: inventoryMovementIds.length > 0,
+          inventoryMovementIds,
           operationId,
           createdAt: timestamp,
           updatedAt: timestamp,

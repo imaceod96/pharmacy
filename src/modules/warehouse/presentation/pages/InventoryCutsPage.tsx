@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Calendar,
   CheckCircle2,
+  ClipboardCheck,
   ClipboardList,
   Clock,
   Eye,
@@ -16,6 +17,7 @@ import {
   Search,
   XCircle,
 } from 'lucide-react';
+import { MorningStockVerificationModal } from '../components/MorningStockVerificationModal';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
 import { ROUTES } from '../../../../app/router/routes';
@@ -63,6 +65,7 @@ export function InventoryCutsPage() {
   const [blockedOpenAccounts, setBlockedOpenAccounts] = useState<
     readonly PendingOpenAccountSummary[]
   >([]);
+  const [isMorningVerificationOpen, setIsMorningVerificationOpen] = useState<boolean>(false);
 
   // Filtros del historial de jornadas
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -499,6 +502,16 @@ export function InventoryCutsPage() {
       <PageHeader
         title="Inventarios / Corte"
         subtitle="Control de jornadas operativas, cortes parciales con conteo ciego y expedientes digitales."
+        actions={
+          <Button
+            variant="secondary"
+            size="md"
+            icon={<ClipboardCheck className="h-4 w-4 text-[#1A5F7A]" />}
+            onClick={() => setIsMorningVerificationOpen(true)}
+          >
+            Conteo matutino
+          </Button>
+        }
       />
 
       {/* BLOQUE A: ESTADO DE LA JORNADA OPERATIVA ACTUAL */}
@@ -855,42 +868,21 @@ export function InventoryCutsPage() {
             />
           </div>
 
-          {(createCutError || blockedOpenAccounts.length > 0) && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-800 space-y-2">
-              <p className="font-semibold">
-                {createCutError ||
-                  'No puedes iniciar un corte parcial porque existen cuentas abiertas. Debes despachar o resolver todas las cuentas pendientes antes de continuar.'}
-              </p>
-
-              {blockedOpenAccounts.length > 0 && (
-                <div className="space-y-1.5 pt-1 border-t border-red-200">
-                  <span className="block text-[11px] font-medium text-red-900">
-                    Cuentas abiertas pendientes ({blockedOpenAccounts.length}):
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {blockedOpenAccounts.map((acc) => (
-                      <button
-                        key={acc.id}
-                        type="button"
-                        onClick={() => {
-                          setIsCreateCutModalOpen(false);
-                          navigate(ROUTES.openSaleDetail(acc.id));
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded border border-red-300 bg-white px-2.5 py-1 text-xs font-semibold text-[#123F55] hover:bg-red-50 cursor-pointer"
-                      >
-                        <span>{acc.displayLabel}</span>
-                        <span className="text-[10px] text-red-700 underline">
-                          Abrir cuenta →
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+          {createCutError && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-800">
+              <p className="font-semibold">{createCutError}</p>
             </div>
           )}
         </form>
       </Modal>
+
+      <MorningStockVerificationModal
+        isOpen={isMorningVerificationOpen}
+        onClose={() => setIsMorningVerificationOpen(false)}
+        onSuccess={() => {
+          notifyDataChanged();
+        }}
+      />
     </div>
   );
 }

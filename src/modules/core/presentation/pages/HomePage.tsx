@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   FileText,
   History,
@@ -14,6 +15,7 @@ import {
   User,
   XCircle,
 } from 'lucide-react';
+import { MorningStockVerificationModal } from '../../../warehouse/presentation/components/MorningStockVerificationModal';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
 import { ROUTES } from '../../../../app/router/routes';
@@ -53,6 +55,7 @@ export function HomePage() {
   const [isSubmittingWorkday, setIsSubmittingWorkday] = useState<boolean>(false);
   const [workdayError, setWorkdayError] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [isMorningVerificationOpen, setIsMorningVerificationOpen] = useState<boolean>(false);
 
   // Modal de bloqueo o preparación para el cierre de jornada e inventario final
   const [closingBlockModal, setClosingBlockModal] = useState<{
@@ -263,7 +266,16 @@ export function HomePage() {
                 </div>
               </div>
 
-              <div className="shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <Button
+                  variant="secondary"
+                  size="md"
+                  icon={<ClipboardCheck className="h-4 w-4 text-[#1A5F7A]" />}
+                  onClick={() => setIsMorningVerificationOpen(true)}
+                >
+                  Conteo matutino
+                </Button>
+
                 <Button
                   variant="primary"
                   size="md"
@@ -824,6 +836,16 @@ export function HomePage() {
       >
         <p className="text-xs leading-relaxed text-slate-600">{noticeModal.content}</p>
       </Modal>
+
+      {/* Modal 4: Conteo Matutino de Existencias */}
+      <MorningStockVerificationModal
+        isOpen={isMorningVerificationOpen}
+        onClose={() => setIsMorningVerificationOpen(false)}
+        onSuccess={() => {
+          notifyDataChanged();
+          void reloadWorkday();
+        }}
+      />
     </div>
   );
 }

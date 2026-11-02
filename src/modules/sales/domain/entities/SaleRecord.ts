@@ -87,6 +87,8 @@ export interface SaleRecord extends BaseEntity {
   readonly hasStockMovement?: boolean;
   readonly inventoryMovementIds?: readonly EntityId[];
   readonly operationId?: string | null;
+  readonly isPriorWorkdayAccount?: boolean;
+  readonly priorWorkdayCode?: string | null;
 }
 
 export type SaleBaseRecord = SaleRecord;

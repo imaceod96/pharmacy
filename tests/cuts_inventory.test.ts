@@ -16,6 +16,7 @@ import { PrepareFinalInventorySelectionUseCase } from '../src/modules/warehouse/
 import { StartWorkdayClosingUseCase } from '../src/modules/warehouse/application/StartWorkdayClosingUseCase';
 import { ApproveWorkdayClosingUseCase } from '../src/modules/warehouse/application/ApproveWorkdayClosingUseCase';
 import { RectifyWorkdayClosingUseCase } from '../src/modules/warehouse/application/RectifyWorkdayClosingUseCase';
+import { MorningStockVerificationUseCase } from '../src/modules/warehouse/application/MorningStockVerificationUseCase';
 import { IndexedDbCommercialActivityAdapter } from '../src/modules/warehouse/infrastructure/IndexedDbCommercialActivityAdapter';
 import { StoreName } from '../src/shared/lib/indexeddb/schema';
 import { sessionElevationService } from '../src/shared/lib/security/SessionElevationService';
@@ -162,6 +163,75 @@ export async function runCutsAndInventoryTests(): Promise<TestSuiteResult> {
     tests.push({ name: 'Inventario final y rectificación de jornada cerrada con auditoría de versiones', passed: true, durationMs: Date.now() - start });
   } catch (err: any) {
     tests.push({ name: 'Inventario final y rectificación de jornada cerrada con auditoría de versiones', passed: false, durationMs: 0, error: err.message });
+  }
+
+  // Test 3: Verificación Matutina de Existencias (antes de abrir jornada, modalidad auditoría y ajuste de stock)
+  try {
+    const start = Date.now();
+    const engine = await createTestEngine();
+    const registerProduct = new RegisterProductWithInitialEntryUseCase(engine);
+    const morningVerification = new MorningStockVerificationUseCase(engine);
+
+    await engine.runTransaction([StoreName.WAREHOUSE_CATEGORIES, StoreName.WAREHOUSE_UNITS], 'readwrite', async (tx) => {
+      await tx.insert(StoreName.WAREHOUSE_CATEGORIES, { id: 'cat-1', name: 'Snacks', normalizedName: 'SNACKS', isSystemCategory: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await tx.insert(StoreName.WAREHOUSE_UNITS, { id: 'unit-1', name: 'Pieza', symbol: 'pza', normalizedName: 'PIEZA', precisionDigits: 0, isSystemUnit: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    });
+
+    const prodA = await registerProduct.execute(adminActor, {
+      name: 'Galletas Chocolate',
+      sku: 'SKU-GAL-01',
+      categoryId: 'cat-1',
+      measurementUnitId: 'unit-1',
+      initialQuantity: 25,
+      unitPurchasePrice: 8,
+      declaredSalePrice: 15,
+    });
+
+    // 1. Conteo matutino en modo AUDIT_ONLY sin jornada iniciada
+    const auditRecord = await morningVerification.execute(adminActor, {
+      mode: 'AUDIT_ONLY',
+      counts: [{ productId: prodA.id, countedStock: 23 }],
+      notes: 'Conteo matutino previo a turno',
+    });
+
+    assertEquals(auditRecord.mode, 'AUDIT_ONLY');
+    assertEquals(auditRecord.differencesCount, 1);
+    assertEquals(auditRecord.items[0].systemStock, 25);
+    assertEquals(auditRecord.items[0].countedStock, 23);
+    assertEquals(auditRecord.items[0].difference, -2);
+    assertEquals(auditRecord.items[0].isAdjusted, false);
+
+    // En modo AUDIT_ONLY el stock permanece intacto en 25
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, prodA.id);
+      assertEquals(p.currentStock, 25, 'Stock no modificado en modo AUDIT_ONLY');
+    });
+
+    // 2. Conteo matutino en modo ADJUST_STOCK con aplicación de diferencias
+    const adjustRecord = await morningVerification.execute(adminActor, {
+      mode: 'ADJUST_STOCK',
+      counts: [{ productId: prodA.id, countedStock: 23, differenceReason: 'Paquetes rotos retirados de vitrina' }],
+      notes: 'Ajuste matutino aprobado',
+    });
+
+    assertEquals(adjustRecord.mode, 'ADJUST_STOCK');
+    assertEquals(adjustRecord.items[0].isAdjusted, true);
+
+    // En modo ADJUST_STOCK el stock se actualiza a 23 y se genera movimiento de Kardex
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS, StoreName.WAREHOUSE_INVENTORY_MOVEMENTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, prodA.id);
+      assertEquals(p.currentStock, 23, 'Stock ajustado correctamente a 23');
+
+      const movs = await tx.getAll<any>(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS);
+      const adjMov = movs.find((m) => m.productId === prodA.id && m.movementType === 'MORNING_VERIFICATION_ADJUSTMENT');
+      assertEquals(Boolean(adjMov), true, 'Movimiento de Kardex registrado por verificación matutina');
+      assertEquals(adjMov?.quantity, 2);
+      assertEquals(adjMov?.signedQuantity, -2);
+    });
+
+    tests.push({ name: 'Verificación matutina de existencias: modo auditoría y ajuste con Kardex', passed: true, durationMs: Date.now() - start });
+  } catch (err: any) {
+    tests.push({ name: 'Verificación matutina de existencias: modo auditoría y ajuste con Kardex', passed: false, durationMs: 0, error: err.message });
   }
 
   const passedCount = tests.filter((t) => t.passed).length;

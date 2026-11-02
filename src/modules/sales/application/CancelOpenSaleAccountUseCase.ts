@@ -5,12 +5,17 @@ import { Permission, SessionActor } from '../../../shared/types/permissions';
 import { TransactionManager } from '../../../shared/types/repository';
 import { nowISO } from '../../../shared/utils/date';
 import { generateEntityId } from '../../../shared/utils/id';
-import { OperationLogEntry, OperationModule } from '../../core/domain/entities/OperationLog';
+import {
+  InventoryMovementRecord,
+  InventoryMovementType,
+} from '../../warehouse/domain/entities/InventoryMovementRecord';
+import { ProductRecord } from '../../warehouse/domain/entities/ProductRecord';
 import {
   formatSaleDisplayLabel,
   SaleRecord,
   SaleStatus,
 } from '../domain/entities/SaleRecord';
+import { OperationLogEntry, OperationModule } from '../../core/domain/entities/OperationLog';
 
 export interface CancelOpenSaleAccountInput {
   readonly saleId: string;
@@ -59,7 +64,12 @@ export class CancelOpenSaleAccountUseCase {
     const auditId = input.operationId || generateEntityId();
 
     return this.transactionManager.runTransaction(
-      [StoreName.SALES_RECORDS, StoreName.OPERATION_HISTORY],
+      [
+        StoreName.WAREHOUSE_PRODUCTS,
+        StoreName.WAREHOUSE_INVENTORY_MOVEMENTS,
+        StoreName.SALES_RECORDS,
+        StoreName.OPERATION_HISTORY,
+      ],
       'readwrite',
       async (tx) => {
         // Idempotencia por auditId
@@ -112,6 +122,44 @@ export class CancelOpenSaleAccountUseCase {
           );
         }
 
+        // Reintegrar todas las existencias de los productos de la cuenta al almacén
+        const inventoryMovementIds = [...(existingSale.inventoryMovementIds ?? [])];
+
+        for (const item of existingSale.items ?? []) {
+          const product = await tx.get<ProductRecord>(
+            StoreName.WAREHOUSE_PRODUCTS,
+            item.productId
+          );
+          if (!product) continue;
+
+          const previousStock = product.currentStock;
+          const resultingStock = Math.round((previousStock + item.quantity) * 1000) / 1000;
+
+          await tx.upsert<ProductRecord>(StoreName.WAREHOUSE_PRODUCTS, {
+            ...product,
+            currentStock: resultingStock,
+            updatedAt: timestamp,
+          });
+
+          const movementId = generateEntityId();
+          const movement: InventoryMovementRecord = {
+            id: movementId,
+            productId: product.id,
+            movementType: InventoryMovementType.CORRECTION_POSITIVE,
+            quantity: item.quantity,
+            signedQuantity: item.quantity,
+            previousStock,
+            resultingStock,
+            timestamp,
+            responsibleUserId: actor.role,
+            originOperationId: existingSale.id,
+            reason: `Reintegro por cancelación de cuenta abierta ${formatSaleDisplayLabel(existingSale)}: ${reason}`,
+            workdayId: existingSale.createdWorkdayId ?? null,
+          };
+          await tx.insert(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS, movement);
+          inventoryMovementIds.push(movementId);
+        }
+
         const cancelledSale: SaleRecord = {
           ...existingSale,
           status: SaleStatus.CANCELLED,
@@ -121,6 +169,7 @@ export class CancelOpenSaleAccountUseCase {
           cancelledByUserLabel: actor.label,
           cancellationReason: reason,
           hasStockMovement: false,
+          inventoryMovementIds,
           updatedAt: timestamp,
         };
 

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   FileCheck2,
   History,
+  Info,
   Lock,
   PauseCircle,
   PlayCircle,
@@ -394,24 +395,24 @@ export function FinalInventoryWorkspace({
       )}
 
       {blockedAccounts.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 space-y-3">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-900 space-y-3">
           <div className="font-semibold flex items-center gap-1.5">
-            <Lock className="h-4 w-4 text-amber-700 shrink-0" />
-            <span>Cierre de jornada bloqueado por cuentas abiertas pendientes</span>
+            <Info className="h-4 w-4 text-blue-700 shrink-0" />
+            <span>Cuentas abiertas en curso ({blockedAccounts.length}) · Mercancía ya descontada</span>
           </div>
-          <p className="text-xs leading-relaxed text-amber-800">
-            Existen {blockedAccounts.length} cuenta(s) en estado abierto (OPEN). Por directiva de control,
-            no se permite iniciar ni aprobar inventarios finales de jornada mientras existan cuentas abiertas.
-            Debe despachar o cancelar dichas cuentas previamente.
+          <p className="text-xs leading-relaxed text-blue-800">
+            Existen {blockedAccounts.length} cuenta(s) abiertas. El cierre de jornada se puede realizar con normalidad.
+            Las existencias de estas cuentas ya fueron descontadas del almacén físico. No aumentarán el valor de ventas del día
+            hasta que sean despachadas manualmente en una próxima jornada abierta.
           </p>
-          <div className="divide-y divide-amber-200/60 rounded border border-amber-200 bg-white">
+          <div className="divide-y divide-blue-200/60 rounded border border-blue-200 bg-white">
             {blockedAccounts.map((acc) => (
               <div key={acc.id} className="p-2.5 flex items-center justify-between text-xs">
                 <div>
                   <span className="font-bold text-[#123F55]">{acc.displayLabel}</span>
                   <span className="text-slate-500 ml-2">({acc.folio})</span>
                 </div>
-                <span className="font-mono font-bold text-amber-900">
+                <span className="font-mono font-bold text-blue-900">
                   {formatCurrency(acc.totalAmount)}
                 </span>
               </div>

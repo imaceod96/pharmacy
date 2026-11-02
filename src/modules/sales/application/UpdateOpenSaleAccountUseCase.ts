@@ -6,6 +6,10 @@ import { TransactionManager } from '../../../shared/types/repository';
 import { nowISO } from '../../../shared/utils/date';
 import { generateEntityId } from '../../../shared/utils/id';
 import { OperationLogEntry, OperationModule } from '../../core/domain/entities/OperationLog';
+import {
+  InventoryMovementRecord,
+  InventoryMovementType,
+} from '../../warehouse/domain/entities/InventoryMovementRecord';
 import { MeasurementUnitRecord } from '../../warehouse/domain/entities/MeasurementUnitRecord';
 import { ProductRecord, ProductStatus } from '../../warehouse/domain/entities/ProductRecord';
 import {
@@ -62,6 +66,7 @@ export class UpdateOpenSaleAccountUseCase {
         StoreName.WAREHOUSE_WORKDAYS,
         StoreName.WAREHOUSE_PRODUCTS,
         StoreName.WAREHOUSE_UNITS,
+        StoreName.WAREHOUSE_INVENTORY_MOVEMENTS,
         StoreName.SALES_RECORDS,
         StoreName.OPERATION_HISTORY,
       ],
@@ -140,7 +145,7 @@ export class UpdateOpenSaleAccountUseCase {
           );
         }
 
-        // 5. Validar productos y existencias disponibles (sin descontar stock)
+        // 5. Validar productos, calcular deltas de existencias y registrar movimientos en Kardex
         const allUnits = await tx.getAll<MeasurementUnitRecord>(StoreName.WAREHOUSE_UNITS);
         const unitMap = new Map<string, MeasurementUnitRecord>();
         for (const u of allUnits) {
@@ -148,8 +153,104 @@ export class UpdateOpenSaleAccountUseCase {
         }
 
         const existingPriceByProduct = new Map<string, number>();
+        const previousQtyByProduct = new Map<string, number>();
         for (const item of existingSale.items ?? []) {
           existingPriceByProduct.set(item.productId, item.unitSalePrice);
+          previousQtyByProduct.set(item.productId, item.quantity);
+        }
+
+        const newQtyByProduct = new Map<string, number>();
+        for (const line of consolidatedLines) {
+          newQtyByProduct.set(line.productId, line.quantity);
+        }
+
+        const allProductIds = new Set<string>([
+          ...previousQtyByProduct.keys(),
+          ...newQtyByProduct.keys(),
+        ]);
+
+        const inventoryMovementIds = [...(existingSale.inventoryMovementIds ?? [])];
+
+        for (const prodId of allProductIds) {
+          const prevQty = previousQtyByProduct.get(prodId) ?? 0;
+          const newQty = newQtyByProduct.get(prodId) ?? 0;
+          const delta = Math.round((newQty - prevQty) * 1000) / 1000;
+
+          if (delta === 0) continue;
+
+          const product = await tx.get<ProductRecord>(StoreName.WAREHOUSE_PRODUCTS, prodId);
+          if (!product) {
+            throw new EntityNotFoundError('warehouse_products', prodId);
+          }
+
+          if (delta > 0) {
+            if (product.status !== ProductStatus.ACTIVE) {
+              throw new ValidationError(
+                `El producto "${product.name}" se encuentra inactivo y no se pueden agregar más unidades.`
+              );
+            }
+            if (delta > product.currentStock) {
+              throw new ValidationError(
+                `La cantidad adicional solicitada para "${product.name}" (${delta}) supera las existencias disponibles (${product.currentStock}).`
+              );
+            }
+
+            const previousStock = product.currentStock;
+            const resultingStock = Math.round((previousStock - delta) * 1000) / 1000;
+
+            await tx.upsert<ProductRecord>(StoreName.WAREHOUSE_PRODUCTS, {
+              ...product,
+              currentStock: resultingStock,
+              updatedAt: timestamp,
+            });
+
+            const movementId = generateEntityId();
+            const movement: InventoryMovementRecord = {
+              id: movementId,
+              productId: product.id,
+              movementType: InventoryMovementType.SALE,
+              quantity: delta,
+              signedQuantity: -delta,
+              previousStock,
+              resultingStock,
+              timestamp,
+              responsibleUserId: actor.role,
+              originOperationId: existingSale.id,
+              reason: `Adición a cuenta abierta ${existingSale.folio} (${nextAccountName})`,
+              workdayId: existingSale.createdWorkdayId ?? null,
+            };
+            await tx.insert(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS, movement);
+            inventoryMovementIds.push(movementId);
+          } else {
+            // delta < 0: Reintegro de existencias al almacén
+            const restoreQty = Math.abs(delta);
+            const previousStock = product.currentStock;
+            const resultingStock = Math.round((previousStock + restoreQty) * 1000) / 1000;
+
+            await tx.upsert<ProductRecord>(StoreName.WAREHOUSE_PRODUCTS, {
+              ...product,
+              currentStock: resultingStock,
+              updatedAt: timestamp,
+            });
+
+            const movementId = generateEntityId();
+            const movement: InventoryMovementRecord = {
+              id: movementId,
+              productId: product.id,
+              movementType: InventoryMovementType.CORRECTION_POSITIVE,
+              quantity: restoreQty,
+              signedQuantity: restoreQty,
+              previousStock,
+              resultingStock,
+              timestamp,
+              responsibleUserId: actor.role,
+              originOperationId: existingSale.id,
+              reason: `Reintegro por reducción en cuenta abierta ${existingSale.folio} (${nextAccountName})`,
+              workdayId: existingSale.createdWorkdayId ?? null,
+            };
+            await tx.insert(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS, movement);
+            inventoryMovementIds.push(movementId);
+          }
         }
 
         const lineItems: SaleLineItemRecord[] = [];
@@ -160,27 +261,7 @@ export class UpdateOpenSaleAccountUseCase {
             StoreName.WAREHOUSE_PRODUCTS,
             draftLine.productId
           );
-          if (!product) {
-            throw new EntityNotFoundError('warehouse_products', draftLine.productId);
-          }
-
-          if (product.status !== ProductStatus.ACTIVE) {
-            throw new ValidationError(
-              `El producto "${product.name}" se encuentra inactivo. Debes retirarlo de la cuenta para poder guardar o despachar.`
-            );
-          }
-
-          if (product.currentStock <= 0) {
-            throw new ValidationError(
-              `El producto "${product.name}" se encuentra agotado en almacén.`
-            );
-          }
-
-          if (draftLine.quantity > product.currentStock) {
-            throw new ValidationError(
-              `La cantidad solicitada para "${product.name}" (${draftLine.quantity}) supera las existencias disponibles (${product.currentStock}).`
-            );
-          }
+          if (!product) continue;
 
           const unit = unitMap.get(product.measurementUnitId);
           const unitSalePrice =
@@ -215,7 +296,8 @@ export class UpdateOpenSaleAccountUseCase {
           customerOrTableLabel: nextAccountName,
           items: lineItems,
           totalAmount,
-          hasStockMovement: false,
+          hasStockMovement: inventoryMovementIds.length > 0,
+          inventoryMovementIds,
           updatedAt: timestamp,
         };
 

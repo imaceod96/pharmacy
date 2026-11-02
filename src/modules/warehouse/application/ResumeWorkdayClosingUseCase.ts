@@ -42,24 +42,7 @@ export class ResumeWorkdayClosingUseCase {
       [StoreName.WAREHOUSE_WORKDAYS, StoreName.SALES_RECORDS, StoreName.OPERATION_HISTORY],
       'readwrite',
       async (tx) => {
-        // Verificar que no existan cuentas abiertas
-        const openSales = await tx.getAllByIndex<SaleRecord>(
-          StoreName.SALES_RECORDS,
-          'by_status',
-          SaleStatus.OPEN
-        );
-        if (openSales.length > 0) {
-          const sortedOpen = openSales.slice().sort((a, b) => {
-            const numA = a.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            const numB = b.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            if (numA !== numB) return numA - numB;
-            return a.openedAt.localeCompare(b.openedAt);
-          });
-          throw new PendingOpenAccountsError(
-            FINAL_INVENTORY_BLOCKED_BY_OPEN_ACCOUNTS_MESSAGE,
-            sortedOpen.map(toPendingOpenAccountSummary)
-          );
-        }
+        // Las cuentas abiertas se permiten durante la reanudación del cierre.
 
         let workday: WorkdayRecord | undefined;
         if (input.workdayId) {

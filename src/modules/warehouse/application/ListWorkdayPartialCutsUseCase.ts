@@ -122,9 +122,6 @@ export class ListWorkdayPartialCutsUseCase {
     } else if (activeDraftOrReviewCut) {
       canCreateNewCut = false;
       cannotCreateReason = `Existe un corte parcial activo (${activeDraftOrReviewCut.reference}). Continúa o cancela ese borrador antes de abrir otro para evitar intervalos solapados.`;
-    } else if (pendingOpenAccounts.length > 0) {
-      canCreateNewCut = false;
-      cannotCreateReason = PARTIAL_CUT_BLOCKED_BY_OPEN_ACCOUNTS_MESSAGE;
     }
 
     return {

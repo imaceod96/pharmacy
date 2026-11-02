@@ -615,7 +615,7 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
       setIsOpenAccountDirty(false);
       notifyDataChanged();
       setWorkspaceSuccess(
-        `Cambios guardados en ${formatSaleDisplayLabel(result.sale)}. Las existencias no se descuentan hasta confirmar el despacho.`
+        `Cambios guardados en ${formatSaleDisplayLabel(result.sale)}. Las existencias fueron descontadas de almacén; los ingresos se computarán al liquidar la cuenta.`
       );
     } catch (err) {
       setWorkspaceError(
@@ -1007,6 +1007,11 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
               Operaciones de venta bloqueadas por estado de jornada
             </p>
             <p className="mt-0.5">{salesValidation.message}</p>
+            {isEditingOpenAccount && (
+              <p className="mt-1 text-[11px] text-amber-800">
+                Esta cuenta permanece guardada con sus existencias ya descontadas del almacén. No se le pueden añadir más productos hasta que se abra una nueva jornada. Su despacho y liquidación se realizará de forma manual una vez iniciada la nueva jornada.
+              </p>
+            )}
           </div>
         </div>
       )}

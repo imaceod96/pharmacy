@@ -19,7 +19,7 @@ import { ApproveWorkdayClosingUseCase } from '../src/modules/warehouse/applicati
 import { IndexedDbCommercialActivityAdapter } from '../src/modules/warehouse/infrastructure/IndexedDbCommercialActivityAdapter';
 import { StoreName } from '../src/shared/lib/indexeddb/schema';
 import { WorkdayStatus } from '../src/modules/warehouse/domain/entities/WorkdayRecord';
-import { PendingOpenAccountsError } from '../src/modules/sales/domain/entities/SaleRecord';
+import { PendingOpenAccountsError, SaleStatus } from '../src/modules/sales/domain/entities/SaleRecord';
 
 export async function runWorkdayTests(): Promise<TestSuiteResult> {
   const tests: TestResult[] = [];
@@ -75,52 +75,60 @@ export async function runWorkdayTests(): Promise<TestSuiteResult> {
       items: [{ productId: prod.id, quantity: 2 }],
     });
 
-    // 4. Intento de inicio de cierre con cuenta OPEN -> Debe ser bloqueado por PendingOpenAccountsError
-    await assertRejects(
-      () => startClosing.execute(adminActor, { workdayId: w1.workday.id }),
-      PendingOpenAccountsError,
-      'Bloqueo de inicio de cierre por cuentas OPEN'
-    );
-
-    // Resolver cuenta OPEN cancelándola
-    await cancelAccount.execute(adminActor, {
-      saleId: openAcc.sale.id,
-      reason: 'Resuelta para cerrar jornada',
+    // El stock ya se redujo inmediatamente de 50 a 48
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, prod.id);
+      assertEquals(p.currentStock, 48, 'Stock descontado inmediatamente al agregar a cuenta OPEN');
     });
 
-    // Realizar un despacho válido en la jornada
+    // Realizar un despacho directo de 3 piezas en la jornada 1
     await dispatchSale.execute(adminActor, {
-      items: [{ productId: prod.id, quantity: 5 }],
+      items: [{ productId: prod.id, quantity: 3 }],
     });
 
-    // 5. Iniciar proceso de cierre
+    // 4. Iniciar proceso de cierre con cuenta OPEN (permitido por la nueva regla)
     const closingRes = await startClosing.execute(adminActor, { workdayId: w1.workday.id });
-    assertEquals(closingRes.workday.status, WorkdayStatus.CLOSING);
+    assertEquals(closingRes.workday.status, WorkdayStatus.CLOSING, 'Cierre permitido con cuenta abierta');
 
-    // 6. Suspender cierre (reason obligatorio)
+    // 5. Suspender cierre (reason obligatorio)
     const suspendedRes = await suspendClosing.execute(adminActor, { workdayId: w1.workday.id, reason: 'Pausa para alimentos' });
     assertEquals(suspendedRes.workday.status, WorkdayStatus.CLOSING_SUSPENDED);
 
-    // 7. Reanudar cierre
+    // 6. Reanudar cierre
     const resumedRes = await resumeClosing.execute(adminActor, { workdayId: w1.workday.id });
     assertEquals(resumedRes.workday.status, WorkdayStatus.CLOSING);
 
-    // 8. Aprobación final
+    // 7. Aprobación final (conteo físico de 45 unidades: 50 inicial - 2 mesa abierta - 3 despacho directo = 45)
     const approvedRes = await approveClosing.execute(adminActor, {
       workdayId: w1.workday.id,
-      counts: { [prod.id]: 45 }, // 50 - 5 = 45 exacto
+      counts: { [prod.id]: 45 },
       differenceReasons: {},
-      notes: 'Cierre conforme sin diferencias',
+      notes: 'Cierre conforme con mesa abierta pendiente',
     });
     assertEquals(approvedRes.workday.status, WorkdayStatus.CLOSED);
 
-    // 9. Apertura de una jornada posterior (Jornada 2)
+    // 8. Apertura de una jornada posterior (Jornada 2)
     const w2 = await openWorkday.execute(adminActor, { notes: 'Apertura Jornada 2' });
     assertEquals(w2.workday.consecutiveNumber, 2);
     assertEquals(w2.workday.status, WorkdayStatus.OPEN);
 
+    // 9. Despacho manual de la mesa abierta originada en Jornada 1 dentro de la Jornada 2
+    const dispatchedInW2 = await dispatchSale.execute(adminActor, {
+      saleId: openAcc.sale.id,
+    });
+    assertEquals(dispatchedInW2.sale.status, SaleStatus.DISPATCHED);
+    assertEquals(dispatchedInW2.sale.createdWorkdayId, w1.workday.id);
+    assertEquals(dispatchedInW2.sale.dispatchedWorkdayId, w2.workday.id);
+    assertEquals(dispatchedInW2.sale.isPriorWorkdayAccount, true);
+
+    // El stock no se vuelve a descontar, sigue en 45
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, prod.id);
+      assertEquals(p.currentStock, 45, 'Stock no se duplica al despachar mesa abierta de jornada previa');
+    });
+
     tests.push({
-      name: 'Ciclo de vida completo de Jornada: Apertura, rechazo de duplicado, bloqueo por OPEN, Cierre, Suspensión, Reanudación, Aprobación y Apertura posterior',
+      name: 'Ciclo de vida de Jornada con mesas abiertas permitidas, cierre y despacho diferido en Jornada 2',
       passed: true,
       durationMs: Date.now() - start,
     });

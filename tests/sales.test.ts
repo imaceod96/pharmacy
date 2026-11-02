@@ -56,14 +56,16 @@ export async function runSalesTests(): Promise<TestSuiteResult> {
     assertEquals(createdAccount.sale.status, SaleStatus.OPEN);
     assertEquals(createdAccount.sale.totalAmount, 40);
 
-    // Verificar que NO hay movimientos de stock mientras está OPEN
-    await engine.runTransaction([StoreName.WAREHOUSE_INVENTORY_MOVEMENTS], 'readonly', async (tx) => {
+    // Verificar que SÍ hay descuento inmediato de existencias y movimiento de stock al crear la cuenta OPEN
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS, StoreName.WAREHOUSE_INVENTORY_MOVEMENTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p1.id);
+      assertEquals(p.currentStock, 48, 'Descuento inmediato de stock al agregar a cuenta OPEN (50 - 2 = 48)');
       const movs = await tx.getAll(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS);
       const saleMovs = movs.filter((m: any) => m.originOperationId === createdAccount.sale.id);
-      assertEquals(saleMovs.length, 0, 'Cero movimientos de stock mientras la cuenta está OPEN');
+      assertEquals(saleMovs.length, 1, 'Movimiento de salida generado al crear cuenta OPEN');
     });
 
-    // 2. Modificar partidas de la cuenta
+    // 2. Modificar partidas de la cuenta (aumentar a 5 piezas -> stock baja a 45)
     const updatedAccount = await updateAccount.execute(adminActor, {
       saleId: createdAccount.sale.id,
       accountName: 'Mesa 1 Especial',
@@ -71,16 +73,26 @@ export async function runSalesTests(): Promise<TestSuiteResult> {
     });
     assertEquals(updatedAccount.sale.totalAmount, 100);
 
-    // 3. Cancelar cuenta con motivo
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p1.id);
+      assertEquals(p.currentStock, 45, 'Stock actualizado tras modificar cuenta OPEN (50 - 5 = 45)');
+    });
+
+    // 3. Cancelar cuenta con motivo -> las existencias se devuelven al almacén
     const cancelledAccount = await cancelAccount.execute(adminActor, {
       saleId: createdAccount.sale.id,
       reason: 'Cliente se retiró',
     });
     assertEquals(cancelledAccount.sale.status, SaleStatus.CANCELLED);
 
-    tests.push({ name: 'Cuentas OPEN, actualización, cancelación y ausencia de movimientos', passed: true, durationMs: Date.now() - start });
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p1.id);
+      assertEquals(p.currentStock, 50, 'Restauración completa de existencias en almacén al cancelar cuenta abierta');
+    });
+
+    tests.push({ name: 'Cuentas OPEN: descuento inmediato, actualización y restitución al cancelar', passed: true, durationMs: Date.now() - start });
   } catch (err: any) {
-    tests.push({ name: 'Cuentas OPEN, actualización, cancelación y ausencia de movimientos', passed: false, durationMs: 0, error: err.message });
+    tests.push({ name: 'Cuentas OPEN: descuento inmediato, actualización y restitución al cancelar', passed: false, durationMs: 0, error: err.message });
   }
 
   // Test 2: Despacho directo, despacho de cuenta abierta, asociación con workdayId e idempotencia
@@ -130,7 +142,10 @@ export async function runSalesTests(): Promise<TestSuiteResult> {
     });
 
     assertEquals(dispatchedAcc.sale.status, SaleStatus.DISPATCHED);
-    assertEquals(dispatchedAcc.updatedProducts[0].currentStock, 10); // 16 - 6 = 10
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const p = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p1.id);
+      assertEquals(p.currentStock, 10, 'Existencia correcta tras despacho de cuenta (16 - 6 = 10)');
+    });
 
     // 3. Prevención de doble despacho (cuenta ya despachada)
     await assertRejects(

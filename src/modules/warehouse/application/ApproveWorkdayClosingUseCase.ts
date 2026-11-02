@@ -80,24 +80,8 @@ export class ApproveWorkdayClosingUseCase {
       ],
       'readwrite',
       async (tx) => {
-        // 1. Validar que no existan cuentas abiertas
-        const openSales = await tx.getAllByIndex<SaleRecord>(
-          StoreName.SALES_RECORDS,
-          'by_status',
-          SaleStatus.OPEN
-        );
-        if (openSales.length > 0) {
-          const sortedOpen = openSales.slice().sort((a, b) => {
-            const numA = a.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            const numB = b.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            if (numA !== numB) return numA - numB;
-            return a.openedAt.localeCompare(b.openedAt);
-          });
-          throw new PendingOpenAccountsError(
-            FINAL_INVENTORY_BLOCKED_BY_OPEN_ACCOUNTS_MESSAGE,
-            sortedOpen.map(toPendingOpenAccountSummary)
-          );
-        }
+        // 1. Las cuentas abiertas se permiten al aprobar el cierre de jornada.
+        // Sus cantidades físicas ya fueron descontadas y no suman ingresos hasta su posterior liquidación.
 
         // 2. Obtener jornada
         let workday: WorkdayRecord | undefined;

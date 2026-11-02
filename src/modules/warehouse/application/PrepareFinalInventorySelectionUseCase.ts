@@ -131,24 +131,7 @@ export class PrepareFinalInventorySelectionUseCase {
       ],
       'readonly',
       async (tx) => {
-        // Regla obligatoria 16.3 y 16.5: Bloquear inventario final / cierre de jornada si existe cualquier cuenta en estado OPEN
-        const openSales = await tx.getAllByIndex<SaleRecord>(
-          StoreName.SALES_RECORDS,
-          'by_status',
-          SaleStatus.OPEN
-        );
-        if (openSales.length > 0) {
-          const sortedOpen = openSales.slice().sort((a, b) => {
-            const numA = a.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            const numB = b.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            if (numA !== numB) return numA - numB;
-            return a.openedAt.localeCompare(b.openedAt);
-          });
-          throw new PendingOpenAccountsError(
-            FINAL_INVENTORY_BLOCKED_BY_OPEN_ACCOUNTS_MESSAGE,
-            sortedOpen.map(toPendingOpenAccountSummary)
-          );
-        }
+        // Las cuentas abiertas se permiten durante el inventario final y cierre de jornada.
 
         let workday: WorkdayRecord | undefined;
         if (input.workdayId) {

@@ -115,24 +115,8 @@ export class CreatePartialCutUseCase {
           );
         }
 
-        // Regla obligatoria: Bloquear inicio de corte parcial si existe cualquier cuenta en estado OPEN
-        const openSales = await tx.getAllByIndex<SaleRecord>(
-          StoreName.SALES_RECORDS,
-          'by_status',
-          SaleStatus.OPEN
-        );
-        if (openSales.length > 0) {
-          const sortedOpen = openSales.slice().sort((a, b) => {
-            const numA = a.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            const numB = b.consecutiveNumber ?? Number.MAX_SAFE_INTEGER;
-            if (numA !== numB) return numA - numB;
-            return a.openedAt.localeCompare(b.openedAt);
-          });
-          throw new PendingOpenAccountsError(
-            PARTIAL_CUT_BLOCKED_BY_OPEN_ACCOUNTS_MESSAGE,
-            sortedOpen.map(toPendingOpenAccountSummary)
-          );
-        }
+        // En la nueva regla de negocio, los cortes parciales son permitidos aunque existan cuentas abiertas.
+        // Las existencias de las cuentas abiertas ya fueron descontadas físicamente de almacén.
 
         const existingCuts = await tx.getAllByIndex<PartialInventoryCutRecord>(
           StoreName.WAREHOUSE_INVENTORY_CUTS,

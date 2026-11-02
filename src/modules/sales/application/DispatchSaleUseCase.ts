@@ -245,18 +245,20 @@ export class DispatchSaleUseCase {
             );
           }
 
-          if (product.currentStock <= 0) {
-            throw new ValidationError(
-              `No es posible despachar porque el producto "${product.name}" se encuentra agotado en almacén (existencia disponible: 0).`
-            );
-          }
+          if (!existingOpenSale) {
+            if (product.currentStock <= 0) {
+              throw new ValidationError(
+                `No es posible despachar porque el producto "${product.name}" se encuentra agotado en almacén (existencia disponible: 0).`
+              );
+            }
 
-          const resultingStock =
-            Math.round((product.currentStock - line.quantity) * 100) / 100;
-          if (line.quantity > product.currentStock || resultingStock < 0) {
-            throw new ValidationError(
-              `Existencias insuficientes para "${product.name}": disponible ${product.currentStock}, solicitado ${line.quantity}. Ajusta la cantidad antes de despachar.`
-            );
+            const resultingStock =
+              Math.round((product.currentStock - line.quantity) * 100) / 100;
+            if (line.quantity > product.currentStock || resultingStock < 0) {
+              throw new ValidationError(
+                `Existencias insuficientes para "${product.name}": disponible ${product.currentStock}, solicitado ${line.quantity}. Ajusta la cantidad antes de despachar.`
+              );
+            }
           }
 
           const previousSavedPrice = savedPriceByProductId.get(product.id);
@@ -368,38 +370,50 @@ export class DispatchSaleUseCase {
         let totalCostAmount = 0;
 
         for (const item of validatedProducts) {
-          const previousStock = item.product.currentStock;
-          const resultingStock =
-            Math.round((previousStock - item.quantity) * 100) / 100;
+          if (!existingOpenSale) {
+            const previousStock = item.product.currentStock;
+            const resultingStock =
+              Math.round((previousStock - item.quantity) * 100) / 100;
 
-          const updatedProduct: ProductRecord = {
-            ...item.product,
-            currentStock: resultingStock,
-            updatedAt: timestamp,
-          };
-          await tx.upsert(StoreName.WAREHOUSE_PRODUCTS, updatedProduct);
-          updatedProducts.push(updatedProduct);
+            const updatedProduct: ProductRecord = {
+              ...item.product,
+              currentStock: resultingStock,
+              updatedAt: timestamp,
+            };
+            await tx.upsert(StoreName.WAREHOUSE_PRODUCTS, updatedProduct);
+            updatedProducts.push(updatedProduct);
 
-          const movementId = generateEntityId();
-          movementIds.push(movementId);
+            const movementId = generateEntityId();
+            movementIds.push(movementId);
 
-          const movement: InventoryMovementRecord = {
-            id: movementId,
-            productId: item.product.id,
-            movementType: InventoryMovementType.SALE,
-            quantity: item.quantity,
-            previousStock,
-            resultingStock,
-            timestamp,
-            responsibleUserId: actor.label,
-            originOperationId: saleId,
-            reason: `Despacho de mercancía · ${displayReference}`,
-            workdayId: dispatchWorkday.id,
-          };
-          await tx.insert(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS, movement);
-          createdMovements.push(movement);
+            const movement: InventoryMovementRecord = {
+              id: movementId,
+              productId: item.product.id,
+              movementType: InventoryMovementType.SALE,
+              quantity: item.quantity,
+              previousStock,
+              resultingStock,
+              timestamp,
+              responsibleUserId: actor.label,
+              originOperationId: saleId,
+              reason: `Despacho de mercancía · ${displayReference}`,
+              workdayId: dispatchWorkday.id,
+            };
+            await tx.insert(StoreName.WAREHOUSE_INVENTORY_MOVEMENTS, movement);
+            createdMovements.push(movement);
+          } else {
+            // En cuentas abiertas, las existencias físicas ya fueron descontadas de almacén al agregar productos a la mesa.
+            // Conservamos los IDs de movimientos generados previamente en la apertura/modificación.
+            if (existingOpenSale.inventoryMovementIds) {
+              for (const mId of existingOpenSale.inventoryMovementIds) {
+                if (!movementIds.includes(mId)) {
+                  movementIds.push(mId);
+                }
+              }
+            }
+          }
 
-          // Asignar costos FIFO sobre las capas de costo disponibles
+          // Asignar costos FIFO sobre las capas de costo disponibles (atribuido a la jornada en que se liquida/despacha)
           const fifoResult = allocateCostLayersFIFO(item.product.id, item.quantity, allCostLayers);
           allCostLayers = fifoResult.updatedLayers as ProductCostLayer[];
 
@@ -441,6 +455,15 @@ export class DispatchSaleUseCase {
           await tx.upsert(StoreName.WAREHOUSE_COST_LAYERS, layer);
         }
 
+        const isFromPriorWorkday = Boolean(
+          existingOpenSale &&
+          existingOpenSale.createdWorkdayId &&
+          existingOpenSale.createdWorkdayId !== dispatchWorkday.id
+        );
+        const priorWorkday = isFromPriorWorkday
+          ? allWorkdays.find((w) => w.id === existingOpenSale?.createdWorkdayId)
+          : null;
+
         // 8. Guardar o actualizar el registro de venta como DISPATCHED con precios e importes congelados
         // Nota: workdayId apunta a la jornada en que se despachó para integrarse con el expediente y cortes parciales
         // de la jornada de despacho, mientras createdWorkdayId conserva la jornada de apertura original.
@@ -472,6 +495,8 @@ export class DispatchSaleUseCase {
           hasStockMovement: true,
           inventoryMovementIds: movementIds,
           operationId,
+          isPriorWorkdayAccount: isFromPriorWorkday,
+          priorWorkdayCode: priorWorkday?.code ?? null,
           createdAt,
           updatedAt: timestamp,
         };

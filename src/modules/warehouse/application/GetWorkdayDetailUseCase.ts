@@ -58,6 +58,17 @@ export interface WorkdayDispatchedSaleItem {
   readonly items: readonly SaleLineItemRecord[];
   readonly totalAmount: number;
   readonly inventoryMovementIds: readonly string[];
+  readonly isPriorWorkdayAccount?: boolean;
+  readonly priorWorkdayCode?: string | null;
+}
+
+export interface OpenAccountProductSummaryItem {
+  readonly productId: string;
+  readonly productName: string;
+  readonly unitName: string;
+  readonly quantity: number;
+  readonly totalValue: number;
+  readonly accountCount: number;
 }
 
 export interface WorkdayDossierDetailView {
@@ -70,6 +81,10 @@ export interface WorkdayDossierDetailView {
   readonly closureVersions: readonly never[];
   readonly commercialPerformance?: WorkdayCommercialPerformanceResult;
   readonly rectifications: readonly WarehouseClosingRectification[];
+  readonly openAccountsStockBreakdown?: readonly OpenAccountProductSummaryItem[];
+  readonly openAccountsTotalValue?: number;
+  readonly openAccountsTotalUnits?: number;
+  readonly openAccountsCount?: number;
 }
 
 export class GetWorkdayDetailUseCase {
@@ -179,9 +194,50 @@ export class GetWorkdayDetailUseCase {
             items: s.items || [],
             totalAmount: s.totalAmount || 0,
             inventoryMovementIds: s.inventoryMovementIds || [],
+            isPriorWorkdayAccount: s.isPriorWorkdayAccount ?? Boolean(s.createdWorkdayId && s.createdWorkdayId !== workday.id),
+            priorWorkdayCode: s.priorWorkdayCode ?? null,
           }));
 
         const saleIds = new Set(workdaySales.map((s) => s.id));
+
+        // Calcular desglose de mercancía en cuentas abiertas (descontada de almacén pero aún no liquidada)
+        const openSales = allSales.filter((s) => s.status === SaleStatus.OPEN);
+        let openAccountsTotalValue = 0;
+        let openAccountsTotalUnits = 0;
+        const openAccountsProductsMap = new Map<string, {
+          productId: string;
+          productName: string;
+          unitName: string;
+          quantity: number;
+          totalValue: number;
+          accountCount: number;
+        }>();
+
+        for (const os of openSales) {
+          for (const item of (os.items || [])) {
+            openAccountsTotalUnits = Math.round((openAccountsTotalUnits + item.quantity) * 100) / 100;
+            openAccountsTotalValue = Math.round((openAccountsTotalValue + item.lineSubtotal) * 100) / 100;
+            const existing = openAccountsProductsMap.get(item.productId);
+            if (existing) {
+              existing.quantity = Math.round((existing.quantity + item.quantity) * 100) / 100;
+              existing.totalValue = Math.round((existing.totalValue + item.lineSubtotal) * 100) / 100;
+              existing.accountCount += 1;
+            } else {
+              openAccountsProductsMap.set(item.productId, {
+                productId: item.productId,
+                productName: item.productName || productMap.get(item.productId) || 'Producto',
+                unitName: item.unitName || 'u.',
+                quantity: item.quantity,
+                totalValue: item.lineSubtotal,
+                accountCount: 1,
+              });
+            }
+          }
+        }
+
+        const openAccountsStockBreakdown: OpenAccountProductSummaryItem[] = Array.from(
+          openAccountsProductsMap.values()
+        ).sort((a, b) => b.totalValue - a.totalValue);
 
         // Obtener movimientos vinculados estrictamente a esta jornada
         const allMovements = await tx.getAll<InventoryMovementRecord>(
@@ -241,6 +297,10 @@ export class GetWorkdayDetailUseCase {
           closureVersions: [],
           commercialPerformance,
           rectifications: rectifications.slice().sort((a, b) => b.versionNumber - a.versionNumber),
+          openAccountsStockBreakdown,
+          openAccountsTotalValue,
+          openAccountsTotalUnits,
+          openAccountsCount: openSales.length,
         };
       }
     );
