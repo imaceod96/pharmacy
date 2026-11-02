@@ -12,6 +12,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -20,11 +23,10 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Instalar Node.js (LTS v22)
+      - name: Instalar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
 
       - name: Instalar Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +34,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Instalar dependencias del proyecto
-        run: npm ci
+        run: npm install
 
       - name: Comprobar TypeScript
         run: npm run lint
