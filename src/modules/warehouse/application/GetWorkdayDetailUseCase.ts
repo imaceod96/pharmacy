@@ -25,6 +25,8 @@ import {
 } from '../domain/entities/WorkdayCommercialPerformance';
 import { WarehouseClosingRectification } from '../domain/entities/WarehouseClosingRectification';
 
+import { ExpenseDailySummary, ExpenseRecord, ExpenseType } from '../../expenses/domain/entities/ExpenseRecord';
+
 export interface WorkdayMovementItem {
   readonly id: string;
   readonly productId: string;
@@ -57,6 +59,8 @@ export interface WorkdayDispatchedSaleItem {
   readonly dispatchedWorkdayId: string;
   readonly items: readonly SaleLineItemRecord[];
   readonly totalAmount: number;
+  readonly transferAmount?: number;
+  readonly cashAmount?: number;
   readonly inventoryMovementIds: readonly string[];
   readonly isPriorWorkdayAccount?: boolean;
   readonly priorWorkdayCode?: string | null;
@@ -85,6 +89,12 @@ export interface WorkdayDossierDetailView {
   readonly openAccountsTotalValue?: number;
   readonly openAccountsTotalUnits?: number;
   readonly openAccountsCount?: number;
+  readonly expenses?: readonly ExpenseRecord[];
+  readonly expensesSummary?: ExpenseDailySummary;
+  readonly adjustedNetProfit?: number;
+  readonly totalTransferSalesAmount?: number;
+  readonly totalCashSalesAmount?: number;
+  readonly expectedCashInDrawer?: number;
 }
 
 export class GetWorkdayDetailUseCase {
@@ -112,6 +122,7 @@ export class GetWorkdayDetailUseCase {
         StoreName.SALES_RECORDS,
         StoreName.WAREHOUSE_CLOSING_RECTIFICATIONS,
         StoreName.OPERATION_HISTORY,
+        StoreName.EXPENSES,
       ],
       'readonly',
       async (tx) => {
@@ -193,6 +204,8 @@ export class GetWorkdayDetailUseCase {
             dispatchedWorkdayId: s.dispatchedWorkdayId ?? workday.id,
             items: s.items || [],
             totalAmount: s.totalAmount || 0,
+            transferAmount: s.transferAmount ?? 0,
+            cashAmount: s.cashAmount ?? (s.totalAmount || 0),
             inventoryMovementIds: s.inventoryMovementIds || [],
             isPriorWorkdayAccount: s.isPriorWorkdayAccount ?? Boolean(s.createdWorkdayId && s.createdWorkdayId !== workday.id),
             priorWorkdayCode: s.priorWorkdayCode ?? null,
@@ -287,6 +300,43 @@ export class GetWorkdayDetailUseCase {
 
         const commercialPerformance = calculateWorkdayCommercialPerformance(workday.id, allSales, allProducts);
 
+        // Obtener gastos vinculados a esta jornada
+        const allExpenses = await tx.getAll<ExpenseRecord>(StoreName.EXPENSES);
+        const workdayExpenses = allExpenses
+          .filter((e) => e.workdayId === workday.id)
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+        let totalExpenseAmount = 0;
+        let totalProductExpenseAmount = 0;
+        let totalManualExpenseAmount = 0;
+
+        for (const exp of workdayExpenses) {
+          totalExpenseAmount = Math.round((totalExpenseAmount + exp.amount) * 100) / 100;
+          if (exp.type === ExpenseType.INVENTORY_PRODUCT) {
+            totalProductExpenseAmount = Math.round((totalProductExpenseAmount + exp.amount) * 100) / 100;
+          } else {
+            totalManualExpenseAmount = Math.round((totalManualExpenseAmount + exp.amount) * 100) / 100;
+          }
+        }
+
+        const expensesSummary: ExpenseDailySummary = {
+          totalAmount: totalExpenseAmount,
+          totalProductExpenseAmount,
+          totalManualExpenseAmount,
+          count: workdayExpenses.length,
+        };
+
+        const grossProfit = commercialPerformance?.grossProfit ?? 0;
+        const adjustedNetProfit = Math.round((grossProfit - totalExpenseAmount) * 100) / 100;
+
+        let totalTransferSalesAmount = 0;
+        let totalCashSalesAmount = 0;
+        for (const s of workdaySales) {
+          totalTransferSalesAmount = Math.round((totalTransferSalesAmount + (s.transferAmount ?? 0)) * 100) / 100;
+          totalCashSalesAmount = Math.round((totalCashSalesAmount + (s.cashAmount ?? s.totalAmount ?? 0)) * 100) / 100;
+        }
+        const expectedCashInDrawer = Math.round((totalCashSalesAmount - totalManualExpenseAmount) * 100) / 100;
+
         return {
           workday,
           movements: workdayMovements,
@@ -301,6 +351,12 @@ export class GetWorkdayDetailUseCase {
           openAccountsTotalValue,
           openAccountsTotalUnits,
           openAccountsCount: openSales.length,
+          expenses: workdayExpenses,
+          expensesSummary,
+          adjustedNetProfit,
+          totalTransferSalesAmount,
+          totalCashSalesAmount,
+          expectedCashInDrawer,
         };
       }
     );

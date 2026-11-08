@@ -17,6 +17,8 @@ const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
     Permission.VIEW_SETTINGS,
     Permission.MANAGE_BACKUPS,
     Permission.VIEW_OPERATION_HISTORY,
+    Permission.VIEW_EXPENSES,
+    Permission.CREATE_EXPENSE,
   ]),
   [UserRole.CASHIER]: new Set<Permission>([
     Permission.VIEW_DASHBOARD,
@@ -25,6 +27,8 @@ const ROLE_PERMISSIONS: Record<UserRole, ReadonlySet<Permission>> = {
     Permission.VIEW_SALES_HISTORY,
     Permission.VIEW_PRODUCTS,
     Permission.VIEW_INVENTORY_CUTS,
+    Permission.VIEW_EXPENSES,
+    Permission.CREATE_EXPENSE,
   ]),
 };
 

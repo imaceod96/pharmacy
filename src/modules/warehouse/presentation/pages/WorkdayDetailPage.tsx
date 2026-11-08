@@ -674,6 +674,8 @@ export function WorkdayDetailPage({ workdayId }: WorkdayDetailPageProps) {
               performance={dossier.commercialPerformance}
               dispatchedSales={sales}
               canViewCosts={canViewCosts}
+              expensesSummary={dossier.expensesSummary}
+              adjustedNetProfit={dossier.adjustedNetProfit}
             />
           )}
 

@@ -1,7 +1,7 @@
 import { ReferentialIntegrityRule } from '../../types/repository';
 
 export const DATABASE_NAME = 'establecimiento_comercial_local_db';
-export const DATABASE_VERSION = 10;
+export const DATABASE_VERSION = 11;
 
 export enum StoreName {
   SYSTEM_METADATA = 'system_metadata',
@@ -18,6 +18,7 @@ export enum StoreName {
   WAREHOUSE_COST_LAYERS = 'warehouse_cost_layers',
   WAREHOUSE_CLOSING_RECTIFICATIONS = 'warehouse_closing_rectifications',
   SALES_RECORDS = 'sales_records',
+  EXPENSES = 'expenses',
 }
 
 export const ALL_BUSINESS_STORES: readonly StoreName[] = [
@@ -35,6 +36,7 @@ export const ALL_BUSINESS_STORES: readonly StoreName[] = [
   StoreName.WAREHOUSE_COST_LAYERS,
   StoreName.WAREHOUSE_CLOSING_RECTIFICATIONS,
   StoreName.SALES_RECORDS,
+  StoreName.EXPENSES,
 ];
 
 export interface DatabaseMigration {
@@ -278,6 +280,19 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
         const rectStore = db.createObjectStore(StoreName.WAREHOUSE_CLOSING_RECTIFICATIONS, { keyPath: 'id' });
         rectStore.createIndex('by_workday_id', 'workdayId', { unique: false });
         rectStore.createIndex('by_created_at', 'createdAt', { unique: false });
+      }
+    },
+  },
+  {
+    version: 11,
+    description:
+      'Módulo de Gastos Operativos (expenses). Registro de gastos manuales y autoconsumo de productos con deducción diaria.',
+    upgrade: (db: IDBDatabase) => {
+      if (!db.objectStoreNames.contains(StoreName.EXPENSES)) {
+        const expensesStore = db.createObjectStore(StoreName.EXPENSES, { keyPath: 'id' });
+        expensesStore.createIndex('by_workday_id', 'workdayId', { unique: false });
+        expensesStore.createIndex('by_timestamp', 'timestamp', { unique: false });
+        expensesStore.createIndex('by_type', 'type', { unique: false });
       }
     },
   },

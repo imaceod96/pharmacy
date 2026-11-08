@@ -59,6 +59,9 @@ import { RectifyWorkdayClosingUseCase } from '../../modules/warehouse/applicatio
 import { MorningStockVerificationUseCase } from '../../modules/warehouse/application/MorningStockVerificationUseCase';
 import { ExcelInventoryService } from '../../modules/warehouse/application/ExcelInventoryService';
 import { UpdateProductSalePriceUseCase } from '../../modules/warehouse/application/UpdateProductSalePriceUseCase';
+import { CreateExpenseUseCase } from '../../modules/expenses/application/CreateExpenseUseCase';
+import { ListExpensesUseCase } from '../../modules/expenses/application/ListExpensesUseCase';
+import { DeleteExpenseUseCase } from '../../modules/expenses/application/DeleteExpenseUseCase';
 import { IndexedDbCategoryRepository } from '../../modules/warehouse/infrastructure/IndexedDbCategoryRepository';
 import { IndexedDbCommercialActivityAdapter } from '../../modules/warehouse/infrastructure/IndexedDbCommercialActivityAdapter';
 import { IndexedDbInventoryCutRepository } from '../../modules/warehouse/infrastructure/IndexedDbInventoryCutRepository';
@@ -81,6 +84,11 @@ export interface ApplicationUseCases {
     readonly setupInitialAdminPin: SetupInitialAdminPinUseCase;
     readonly changeAdminPin: ChangeAdminPinUseCase;
     readonly checkAdminPinStatus: CheckAdminPinStatusUseCase;
+  };
+  readonly expenses: {
+    readonly createExpense: CreateExpenseUseCase;
+    readonly listExpenses: ListExpensesUseCase;
+    readonly deleteExpense: DeleteExpenseUseCase;
   };
   readonly warehouse: {
     readonly createCategory: CreateCategoryUseCase;
@@ -265,6 +273,11 @@ export function ApplicationProvider({
         updateOpenSaleAccount: new UpdateOpenSaleAccountUseCase(engine),
         dispatchSale: new DispatchSaleUseCase(engine),
         cancelOpenSaleAccount: new CancelOpenSaleAccountUseCase(engine),
+      },
+      expenses: {
+        createExpense: new CreateExpenseUseCase(engine),
+        listExpenses: new ListExpensesUseCase(engine),
+        deleteExpense: new DeleteExpenseUseCase(engine),
       },
     };
 

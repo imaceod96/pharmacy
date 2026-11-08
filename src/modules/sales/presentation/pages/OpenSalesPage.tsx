@@ -99,6 +99,7 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
   // Modal 2: Confirmación de despacho (directo o desde cuenta abierta)
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState<boolean>(false);
   const [dispatchOperationId, setDispatchOperationId] = useState<string>('');
+  const [dispatchTransferAmountInput, setDispatchTransferAmountInput] = useState<string>('');
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [dispatchedReceiptSale, setDispatchedReceiptSale] = useState<SaleRecord | null>(null);
 
@@ -641,12 +642,25 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
     if (!validateCurrentDraftLines()) return;
 
     setDispatchOperationId(generateEntityId());
+    setDispatchTransferAmountInput('');
     setDispatchError(null);
     setIsDispatchModalOpen(true);
   };
 
   const handleConfirmDispatch = async () => {
     setDispatchError(null);
+
+    const parsedTransfer = Number(dispatchTransferAmountInput.trim());
+    const transferAmountToPass =
+      !isNaN(parsedTransfer) && parsedTransfer > 0 ? parsedTransfer : 0;
+
+    if (transferAmountToPass > catalogSyncedTotalAmount) {
+      setDispatchError(
+        `El monto por transferencia (${formatCurrency(transferAmountToPass)}) no puede ser mayor al total a despachar (${formatCurrency(catalogSyncedTotalAmount)}).`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -660,6 +674,7 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
         expectedUpdatedAt: isEditingOpenAccount ? expectedUpdatedAt : undefined,
         requirePriceSyncConfirmation: true,
         confirmCatalogPriceUpdates: true,
+        transferAmount: transferAmountToPass,
         operationId: dispatchOperationId,
       });
 
@@ -1762,6 +1777,67 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
             <span className="font-mono text-lg font-bold text-[#123F55]">
               {formatCurrency(catalogSyncedTotalAmount)}
             </span>
+          </div>
+
+          {/* Desglose de Forma de Pago: Transferencia vs. Efectivo */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3.5 space-y-3">
+            <h4 className="text-xs font-bold text-[#123F55]">
+              Forma de Pago (Transferencia / Efectivo)
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="dispatch-transfer-input"
+                  className="block text-[11px] font-semibold text-slate-700 mb-1"
+                >
+                  Monto por transferencia ($)
+                </label>
+                <input
+                  id="dispatch-transfer-input"
+                  type="number"
+                  step="any"
+                  min="0"
+                  max={catalogSyncedTotalAmount}
+                  placeholder="0.00 (Si se omite, 100% efectivo)"
+                  value={dispatchTransferAmountInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const num = Number(val);
+                    if (num > catalogSyncedTotalAmount) {
+                      setDispatchTransferAmountInput(String(catalogSyncedTotalAmount));
+                    } else {
+                      setDispatchTransferAmountInput(val);
+                    }
+                  }}
+                  className="w-full h-8 rounded border border-slate-300 bg-white px-2.5 font-mono text-xs text-slate-900 focus:border-[#1A5F7A] focus:outline-none"
+                />
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Si no ingresas un valor, el sistema asumirá pago 100% en efectivo.
+                </p>
+              </div>
+
+              <div>
+                <span className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Efectivo en caja (calculado automáticamente)
+                </span>
+                {(() => {
+                  const parsed = Number(dispatchTransferAmountInput.trim());
+                  const transferVal = !isNaN(parsed) && parsed > 0 ? Math.min(parsed, catalogSyncedTotalAmount) : 0;
+                  const cashVal = Math.max(0, Math.round((catalogSyncedTotalAmount - transferVal) * 100) / 100);
+                  return (
+                    <div className="h-8 flex items-center justify-between rounded border border-slate-200 bg-emerald-50/70 px-3 font-mono text-xs font-bold text-emerald-900">
+                      <span>{formatCurrency(cashVal)}</span>
+                      {transferVal > 0 && (
+                        <span className="text-[10px] text-emerald-700 font-medium">
+                          (Transf: {formatCurrency(transferVal)})
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
           </div>
         </div>
       </Modal>

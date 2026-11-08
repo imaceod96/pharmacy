@@ -1,5 +1,6 @@
 import { HomePage } from '../../modules/core/presentation/pages/HomePage';
 import { SettingsPage } from '../../modules/core/presentation/pages/SettingsPage';
+import { ExpensesPage } from '../../modules/expenses/presentation/pages/ExpensesPage';
 import { OpenSalesPage } from '../../modules/sales/presentation/pages/OpenSalesPage';
 import { SalesHistoryPage } from '../../modules/sales/presentation/pages/SalesHistoryPage';
 import { InventoryCutsPage } from '../../modules/warehouse/presentation/pages/InventoryCutsPage';
@@ -23,6 +24,8 @@ export function AppRouter() {
         return <OpenSalesPage selectedSaleId={route.saleId} />;
       case AppRouteKey.SALES_HISTORY:
         return <SalesHistoryPage />;
+      case AppRouteKey.EXPENSES:
+        return <ExpensesPage />;
       case AppRouteKey.WAREHOUSE_PRODUCTS:
         return <ProductsPage />;
       case AppRouteKey.WAREHOUSE_PRODUCT_HISTORY:

@@ -60,6 +60,11 @@ export interface DispatchSaleInput {
   readonly requirePriceSyncConfirmation?: boolean;
   readonly confirmCatalogPriceUpdates?: boolean;
   /**
+   * Monto opcional pagado mediante transferencia bancaria / QR.
+   * Si no se especifica o es 0, se asume que el 100% de la venta es en efectivo.
+   */
+  readonly transferAmount?: number;
+  /**
    * Identificador de operación para garantizar idempotencia.
    */
   readonly operationId?: string;
@@ -464,6 +469,24 @@ export class DispatchSaleUseCase {
           ? allWorkdays.find((w) => w.id === existingOpenSale?.createdWorkdayId)
           : null;
 
+        // Validar desglose de forma de pago (Transferencia vs. Efectivo)
+        const rawTransfer = input.transferAmount;
+        let transferAmount = 0;
+        if (rawTransfer !== undefined && rawTransfer !== null) {
+          if (typeof rawTransfer !== 'number' || !Number.isFinite(rawTransfer) || rawTransfer < 0) {
+            throw new ValidationError(
+              'El monto de pago por transferencia debe ser un valor numérico mayor o igual a cero.'
+            );
+          }
+          if (rawTransfer > totalAmount) {
+            throw new ValidationError(
+              `El monto por transferencia ($${rawTransfer.toFixed(2)}) no puede ser mayor al importe total a despachar ($${totalAmount.toFixed(2)}).`
+            );
+          }
+          transferAmount = Math.round(rawTransfer * 100) / 100;
+        }
+        const cashAmount = Math.round((totalAmount - transferAmount) * 100) / 100;
+
         // 8. Guardar o actualizar el registro de venta como DISPATCHED con precios e importes congelados
         // Nota: workdayId apunta a la jornada en que se despachó para integrarse con el expediente y cortes parciales
         // de la jornada de despacho, mientras createdWorkdayId conserva la jornada de apertura original.
@@ -478,6 +501,8 @@ export class DispatchSaleUseCase {
           items: finalLineItems,
           totalAmount,
           totalCostAmount,
+          transferAmount,
+          cashAmount,
           openedAt,
           openedByUserId,
           openedByUserLabel,

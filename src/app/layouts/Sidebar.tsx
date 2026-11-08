@@ -11,6 +11,7 @@ import {
   ReceiptText,
   Settings,
   Store,
+  TrendingDown,
   X,
 } from 'lucide-react';
 import { formatSaleDisplayLabel } from '../../modules/sales/domain/entities/SaleRecord';
@@ -211,7 +212,21 @@ export function Sidebar({ isMobileOpen, onCloseMobile }: SidebarProps) {
           </div>
         )}
 
-        {/* 3. Almacén */}
+        {/* 3. Gastos (justo encima de Almacén) */}
+        {can(Permission.VIEW_EXPENSES) && (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => handleNav(ROUTES.expenses)}
+              className={navItemClass(route.key === AppRouteKey.EXPENSES)}
+            >
+              <TrendingDown className="h-4 w-4 shrink-0 text-slate-300" />
+              <span className="truncate">Gastos</span>
+            </button>
+          </div>
+        )}
+
+        {/* 4. Almacén */}
         {can(Permission.VIEW_PRODUCTS) && (
           <div className="space-y-1 pt-1">
             <button

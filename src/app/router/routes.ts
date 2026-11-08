@@ -3,6 +3,7 @@ export enum AppRouteKey {
   OPEN_SALES = 'OPEN_SALES',
   OPEN_SALE_DETAIL = 'OPEN_SALE_DETAIL',
   SALES_HISTORY = 'SALES_HISTORY',
+  EXPENSES = 'EXPENSES',
   WAREHOUSE_PRODUCTS = 'WAREHOUSE_PRODUCTS',
   WAREHOUSE_PRODUCT_HISTORY = 'WAREHOUSE_PRODUCT_HISTORY',
   WAREHOUSE_INVENTORY_CUTS = 'WAREHOUSE_INVENTORY_CUTS',
@@ -15,6 +16,7 @@ export const ROUTES = {
   openSales: '/ventas-abiertas',
   openSaleDetail: (saleId: string) => `/ventas-abiertas/${encodeURIComponent(saleId)}`,
   salesHistory: '/historial-ventas',
+  expenses: '/gastos',
   warehouseProducts: '/almacen/productos',
   warehouseProductHistory: (productId: string) =>
     `/almacen/productos/${encodeURIComponent(productId)}/historial`,
@@ -38,6 +40,7 @@ export type MatchedRoute =
       readonly breadcrumbs: readonly BreadcrumbItem[];
     }
   | { readonly key: AppRouteKey.SALES_HISTORY; readonly breadcrumbs: readonly BreadcrumbItem[] }
+  | { readonly key: AppRouteKey.EXPENSES; readonly breadcrumbs: readonly BreadcrumbItem[] }
   | {
       readonly key: AppRouteKey.WAREHOUSE_PRODUCTS;
       readonly breadcrumbs: readonly BreadcrumbItem[];
@@ -100,6 +103,13 @@ export function resolveRoute(path: string): MatchedRoute {
         { label: 'Inicio', path: ROUTES.home },
         { label: 'Historial de ventas' },
       ],
+    };
+  }
+
+  if (path === ROUTES.expenses) {
+    return {
+      key: AppRouteKey.EXPENSES,
+      breadcrumbs: [{ label: 'Gastos' }],
     };
   }
 

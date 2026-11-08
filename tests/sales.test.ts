@@ -388,6 +388,68 @@ export async function runSalesTests(): Promise<TestSuiteResult> {
     tests.push({ name: 'Auditoría Central de Ventas e Idempotencia (HALLAZGO-03)', passed: false, durationMs: 0, error: err.message });
   }
 
+  // Test 6: Desglose de forma de pago (Transferencia vs. Efectivo) y cálculo de Efectivo Esperado en Caja
+  try {
+    const start = Date.now();
+    const engine = await createTestEngine();
+    const registerProduct = new RegisterProductWithInitialEntryUseCase(engine);
+    const openWorkday = new OpenWorkdayUseCase(engine);
+    const dispatchSale = new DispatchSaleUseCase(engine);
+    const getWorkdayDetail = new (await import('../src/modules/warehouse/application/GetWorkdayDetailUseCase')).GetWorkdayDetailUseCase(engine);
+
+    await engine.runTransaction([StoreName.WAREHOUSE_CATEGORIES, StoreName.WAREHOUSE_UNITS], 'readwrite', async (tx) => {
+      await tx.insert(StoreName.WAREHOUSE_CATEGORIES, { id: 'cat-1', name: 'General', normalizedName: 'GENERAL', isSystemCategory: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await tx.insert(StoreName.WAREHOUSE_UNITS, { id: 'unit-1', name: 'Pieza', symbol: 'pza', normalizedName: 'PIEZA', precisionDigits: 0, isSystemUnit: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    });
+
+    const wRes = await openWorkday.execute(adminActor, {});
+
+    const p1 = await registerProduct.execute(adminActor, {
+      name: 'Refresco 600ml',
+      sku: 'SKU-REFR-600',
+      categoryId: 'cat-1',
+      measurementUnitId: 'unit-1',
+      initialQuantity: 100,
+      unitPurchasePrice: 10,
+      declaredSalePrice: 25,
+    });
+
+    // 1. Rechazo de transferencia mayor al total ($100 total vs $150 transferencia)
+    await assertRejects(
+      () => dispatchSale.execute(adminActor, {
+        items: [{ productId: p1.id, quantity: 4 }], // total = 100
+        transferAmount: 150,
+      }),
+      'no puede ser mayor al importe total',
+      'Rechazar monto por transferencia mayor al total'
+    );
+
+    // 2. Despacho exitoso con transferencia parcial ($100 total: $40 transferencia, $60 efectivo)
+    const dispatch1 = await dispatchSale.execute(adminActor, {
+      items: [{ productId: p1.id, quantity: 4 }], // total = 100
+      transferAmount: 40,
+    });
+    assertEquals(dispatch1.sale.transferAmount, 40);
+    assertEquals(dispatch1.sale.cashAmount, 60);
+
+    // 3. Despacho 100% efectivo sin transferAmount especificado ($50 total: $0 transferencia, $50 efectivo)
+    const dispatch2 = await dispatchSale.execute(adminActor, {
+      items: [{ productId: p1.id, quantity: 2 }], // total = 50
+    });
+    assertEquals(dispatch2.sale.transferAmount, 0);
+    assertEquals(dispatch2.sale.cashAmount, 50);
+
+    // 4. Verificar métricas en GetWorkdayDetail
+    const detail = await getWorkdayDetail.execute(adminActor, wRes.workday.id);
+    assertEquals(detail.totalTransferSalesAmount, 40, 'Monto acumulado por transferencia en la jornada');
+    assertEquals(detail.totalCashSalesAmount, 110, 'Monto acumulado en efectivo en la jornada (60 + 50 = 110)');
+    assertEquals(detail.expectedCashInDrawer, 110, 'Efectivo esperado en caja (sin gastos manuales = 110)');
+
+    tests.push({ name: 'Desglose de pago por Transferencia vs. Efectivo y Arqueo de Caja', passed: true, durationMs: Date.now() - start });
+  } catch (err: any) {
+    tests.push({ name: 'Desglose de pago por Transferencia vs. Efectivo y Arqueo de Caja', passed: false, durationMs: 0, error: err.message });
+  }
+
   const passedCount = tests.filter((t) => t.passed).length;
   return {
     name: 'PRUEBAS DE CUENTAS Y DESPACHOS',

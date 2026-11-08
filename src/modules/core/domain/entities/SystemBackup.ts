@@ -14,6 +14,7 @@ export interface StoreRecordCounts {
   readonly operationHistory: number;
   readonly priceChanges?: number;
   readonly productStatusChanges?: number;
+  readonly expenses?: number;
 }
 
 export interface SystemStorageSummary {

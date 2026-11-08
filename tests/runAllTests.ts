@@ -10,6 +10,7 @@ import { runPinSecurityTests } from './pin_security.test';
 import { runPrintingAndBackupTests } from './printing_backup.test';
 import { runPerformanceOptimizationTests } from './performance_optimization.test';
 import { runExcelInventoryTests } from './excel_inventory.test';
+import { runExpensesTests } from './expenses.test';
 import { runVolumePerformanceBenchmarks, PerformanceBenchmarkResult } from './volume.test';
 import { TestSuiteResult } from './testUtils';
 
@@ -32,6 +33,7 @@ async function main() {
     runPrintingAndBackupTests,
     runPerformanceOptimizationTests,
     runExcelInventoryTests,
+    runExpensesTests,
   ];
 
   const results: TestSuiteResult[] = [];

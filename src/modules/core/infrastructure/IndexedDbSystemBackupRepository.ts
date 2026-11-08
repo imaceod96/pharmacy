@@ -44,6 +44,7 @@ export class IndexedDbSystemBackupRepository implements SystemBackupRepository {
         operationHistory,
         priceChanges,
         productStatusChanges,
+        expenses,
       ] = await Promise.all([
         tx.count(StoreName.WAREHOUSE_PRODUCTS),
         tx.count(StoreName.WAREHOUSE_CATEGORIES),
@@ -58,6 +59,7 @@ export class IndexedDbSystemBackupRepository implements SystemBackupRepository {
         tx.count(StoreName.OPERATION_HISTORY),
         tx.count(StoreName.WAREHOUSE_PRICE_CHANGES),
         tx.count(StoreName.WAREHOUSE_PRODUCT_STATUS_CHANGES),
+        tx.count(StoreName.EXPENSES),
       ]);
 
       return {
@@ -79,6 +81,7 @@ export class IndexedDbSystemBackupRepository implements SystemBackupRepository {
           operationHistory,
           priceChanges,
           productStatusChanges,
+          expenses,
         },
       };
     });

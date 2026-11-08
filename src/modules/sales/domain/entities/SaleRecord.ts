@@ -70,6 +70,8 @@ export interface SaleRecord extends BaseEntity {
   readonly items?: readonly SaleLineItemRecord[];
   readonly totalAmount?: number;
   readonly totalCostAmount?: number;
+  readonly transferAmount?: number;
+  readonly cashAmount?: number;
   readonly openedAt: ISODateString;
   readonly openedByUserId?: string;
   readonly openedByUserLabel?: string;

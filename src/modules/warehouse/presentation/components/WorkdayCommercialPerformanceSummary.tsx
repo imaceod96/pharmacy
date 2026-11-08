@@ -10,12 +10,19 @@ import { formatCurrency } from '../../../../shared/utils/money';
 import { WorkdayCommercialPerformanceResult } from '../../domain/entities/WorkdayCommercialPerformance';
 import { WorkdayDispatchedSaleItem } from '../../application/GetWorkdayDetailUseCase';
 
+import { ExpenseDailySummary } from '../../../expenses/domain/entities/ExpenseRecord';
+
 export interface WorkdayCommercialPerformanceSummaryProps {
   readonly performance: WorkdayCommercialPerformanceResult;
   readonly dispatchedSales?: readonly WorkdayDispatchedSaleItem[];
   readonly canViewCosts: boolean;
   readonly title?: string;
   readonly description?: string;
+  readonly expensesSummary?: ExpenseDailySummary;
+  readonly adjustedNetProfit?: number;
+  readonly totalTransferSalesAmount?: number;
+  readonly totalCashSalesAmount?: number;
+  readonly expectedCashInDrawer?: number;
 }
 
 export function WorkdayCommercialPerformanceSummary({
@@ -23,8 +30,21 @@ export function WorkdayCommercialPerformanceSummary({
   dispatchedSales = [],
   canViewCosts,
   title = 'Resultado Comercial de la Jornada',
-  description = 'Ventas, costo de mercancía despachada (FIFO), Ganancia Bruta / Utilidad Bruta y margen comercial.',
+  description = 'Ventas, costo de mercancía despachada (FIFO), Ganancia Bruta, Gastos del día y Ganancia Neta Ajustada.',
+  expensesSummary,
+  adjustedNetProfit,
+  totalTransferSalesAmount,
+  totalCashSalesAmount,
+  expectedCashInDrawer,
 }: WorkdayCommercialPerformanceSummaryProps) {
+  const hasExpenses = expensesSummary !== undefined && expensesSummary.totalAmount > 0;
+  const netProfitVal = adjustedNetProfit !== undefined ? adjustedNetProfit : (performance.grossProfit - (expensesSummary?.totalAmount ?? 0));
+
+  const transferSum = totalTransferSalesAmount ?? dispatchedSales.reduce((acc, s) => acc + (s.transferAmount ?? 0), 0);
+  const cashSum = totalCashSalesAmount ?? dispatchedSales.reduce((acc, s) => acc + (s.cashAmount ?? s.totalAmount ?? 0), 0);
+  const manualExpensesVal = expensesSummary?.totalManualExpenseAmount ?? 0;
+  const expectedCashVal = expectedCashInDrawer ?? Math.round((cashSum - manualExpensesVal) * 100) / 100;
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
@@ -34,17 +54,17 @@ export function WorkdayCommercialPerformanceSummary({
         </div>
 
         {/* Tarjetas de Métricas Agregadas */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${hasExpenses ? 'lg:grid-cols-6' : 'lg:grid-cols-4'} gap-4`}>
           <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-1">
             <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
-              <span>1. Valor Comercial Despachado</span>
+              <span>1. Valor Comercial</span>
               <DollarSign className="h-4 w-4 text-[#123F55]" />
             </div>
             <div className="text-xl font-bold font-mono text-[#123F55]">
               {formatCurrency(performance.totalCommercialValue)}
             </div>
             <div className="text-[11px] text-slate-500">
-              {performance.totalDispatchesCount} despacho(s) ({performance.distinctProductsCount} prod. distintos)
+              {performance.totalDispatchesCount} despacho(s) ({performance.distinctProductsCount} prod.)
             </div>
           </div>
 
@@ -52,24 +72,24 @@ export function WorkdayCommercialPerformanceSummary({
             <>
               <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-1">
                 <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
-                  <span>2. Costo de Compra Atribuido</span>
+                  <span>2. Costo FIFO Compra</span>
                   <ShoppingBag className="h-4 w-4 text-slate-600" />
                 </div>
                 <div className="text-xl font-bold font-mono text-slate-800">
                   {performance.hasUnknownCosts ? (
-                    <span className="text-amber-800 text-sm font-semibold">Pendiente de valoración</span>
+                    <span className="text-amber-800 text-sm font-semibold">Pendiente</span>
                   ) : (
                     formatCurrency(performance.totalCostOfGoodsDispatched)
                   )}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Asignación FIFO por lotes de adquisición
+                  Lotes de adquisición
                 </div>
               </div>
 
               <div className="rounded-lg bg-emerald-50/60 border border-emerald-200 p-4 space-y-1">
                 <div className="flex items-center justify-between text-slate-700 text-xs font-semibold">
-                  <span>3. Ganancia Bruta / Utilidad Bruta</span>
+                  <span>3. Ganancia Bruta</span>
                   <TrendingUp className="h-4 w-4 text-emerald-600" />
                 </div>
                 <div
@@ -78,13 +98,13 @@ export function WorkdayCommercialPerformanceSummary({
                   }`}
                 >
                   {performance.hasUnknownCosts ? (
-                    <span className="text-amber-800 text-sm font-semibold">Pendiente de valoración</span>
+                    <span className="text-amber-800 text-sm font-semibold">Pendiente</span>
                   ) : (
                     formatCurrency(performance.grossProfit)
                   )}
                 </div>
                 <div className="text-[11px] text-slate-600">
-                  Valor comercial − Costo de compra atribuido
+                  Venta − Costo FIFO
                 </div>
               </div>
 
@@ -103,15 +123,97 @@ export function WorkdayCommercialPerformanceSummary({
                   )}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  Rentabilidad comercial bruta
+                  Rentabilidad comercial
                 </div>
               </div>
+
+              {expensesSummary && (
+                <>
+                  <div className="rounded-lg bg-red-50/60 border border-red-200 p-4 space-y-1">
+                    <div className="flex items-center justify-between text-red-800 text-xs font-semibold">
+                      <span>5. (-) Gastos del Día</span>
+                      <DollarSign className="h-4 w-4 text-red-600" />
+                    </div>
+                    <div className="text-xl font-bold font-mono text-red-700">
+                      -{formatCurrency(expensesSummary.totalAmount)}
+                    </div>
+                    <div className="text-[11px] text-slate-600 truncate">
+                      Auto: ${expensesSummary.totalProductExpenseAmount.toFixed(2)} | Man: ${expensesSummary.totalManualExpenseAmount.toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg bg-[#123F55]/10 border border-[#123F55]/30 p-4 space-y-1">
+                    <div className="flex items-center justify-between text-[#123F55] text-xs font-bold">
+                      <span>6. (=) Ganancia Neta</span>
+                      <TrendingUp className="h-4 w-4 text-[#123F55]" />
+                    </div>
+                    <div
+                      className={`text-xl font-bold font-mono ${
+                        netProfitVal >= 0 ? 'text-[#123F55]' : 'text-red-700'
+                      }`}
+                    >
+                      {formatCurrency(netProfitVal)}
+                    </div>
+                    <div className="text-[11px] text-slate-600">
+                      Ganancia Bruta − Gastos
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 col-span-1 sm:col-span-3 flex items-center justify-center text-xs text-slate-500 italic">
               Información de costos y utilidades restringida al rol Administrador.
             </div>
           )}
+        </div>
+
+        {/* Cierre y Arqueo de Caja (Medios de Pago: Transferencia vs. Efectivo) */}
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+          <h4 className="text-xs font-bold text-[#123F55]">
+            Cierre y Arqueo de Caja (Medios de Pago)
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+            <div className="rounded-lg bg-white border border-slate-200 p-3 space-y-0.5">
+              <span className="text-slate-500 text-[11px] font-medium block">
+                Ventas por Transferencia
+              </span>
+              <span className="text-base font-bold font-mono text-[#1A5F7A]">
+                {formatCurrency(transferSum)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Ingresos bancarios/QR</span>
+            </div>
+
+            <div className="rounded-lg bg-white border border-slate-200 p-3 space-y-0.5">
+              <span className="text-slate-500 text-[11px] font-medium block">
+                Ventas en Efectivo
+              </span>
+              <span className="text-base font-bold font-mono text-emerald-800">
+                {formatCurrency(cashSum)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Recaudado en caja</span>
+            </div>
+
+            <div className="rounded-lg bg-white border border-slate-200 p-3 space-y-0.5">
+              <span className="text-slate-500 text-[11px] font-medium block">
+                (-) Gastos Manuales del Día
+              </span>
+              <span className="text-base font-bold font-mono text-red-700">
+                -{formatCurrency(manualExpensesVal)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Pagados en efectivo</span>
+            </div>
+
+            <div className="rounded-lg bg-[#123F55] text-white p-3 space-y-0.5 shadow-xs">
+              <span className="text-slate-200 text-[11px] font-semibold block">
+                (=) Efectivo Físico Esperado en Caja
+              </span>
+              <span className="text-lg font-bold font-mono text-[#F49D37]">
+                {formatCurrency(expectedCashVal)}
+              </span>
+              <span className="text-[10px] text-slate-300 block">Efectivo Ventas − Gastos Manuales</span>
+            </div>
+          </div>
         </div>
 
         {/* Desglose por Producto */}
