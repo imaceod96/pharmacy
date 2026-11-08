@@ -37,8 +37,7 @@
     ],
     "windows": {
       "webviewInstallMode": {
-        "type": "offlineInstaller",
-        "silent": true
+        "type": "skip"
       },
       "nsis": {
         "languages": ["Spanish", "English"],

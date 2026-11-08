@@ -42,7 +42,7 @@ jobs:
       - name: Ejecutar pruebas automatizadas
         run: npm run test
 
-      - name: Compilar ejecutable e instalador NSIS (con WebView2 offline incluido)
+      - name: Compilar ejecutable e instalador NSIS (WebView2 integrado en Windows)
         run: npm run tauri:build -- --bundles nsis
 
       - name: Subir instalador como artefacto de GitHub Actions
