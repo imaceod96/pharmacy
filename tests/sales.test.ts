@@ -13,6 +13,9 @@ import { DispatchSaleUseCase } from '../src/modules/sales/application/DispatchSa
 import { RegisterProductWithInitialEntryUseCase } from '../src/modules/warehouse/application/RegisterProductWithInitialEntryUseCase';
 import { OpenWorkdayUseCase } from '../src/modules/warehouse/application/OpenWorkdayUseCase';
 import { UpdateProductSalePriceUseCase } from '../src/modules/warehouse/application/UpdateProductSalePriceUseCase';
+import { RegisterMerchandiseEntryUseCase } from '../src/modules/warehouse/application/RegisterMerchandiseEntryUseCase';
+import { GetOpenSaleDetailUseCase } from '../src/modules/sales/application/GetOpenSaleDetailUseCase';
+import { IndexedDbSaleRepository } from '../src/modules/sales/infrastructure/IndexedDbSaleRepository';
 import { StoreName } from '../src/shared/lib/indexeddb/schema';
 import { SaleStatus } from '../src/modules/sales/domain/entities/SaleRecord';
 
@@ -448,6 +451,112 @@ export async function runSalesTests(): Promise<TestSuiteResult> {
     tests.push({ name: 'Desglose de pago por Transferencia vs. Efectivo y Arqueo de Caja', passed: true, durationMs: Date.now() - start });
   } catch (err: any) {
     tests.push({ name: 'Desglose de pago por Transferencia vs. Efectivo y Arqueo de Caja', passed: false, durationMs: 0, error: err.message });
+  }
+
+  // Test 7: Cuenta abierta con stock 0 en almacén no bloquea despacho y reconoce nueva entrada de mercancía
+  try {
+    const start = Date.now();
+    const engine = await createTestEngine();
+    const registerProduct = new RegisterProductWithInitialEntryUseCase(engine);
+    const openWorkday = new OpenWorkdayUseCase(engine);
+    const createAccount = new CreateOpenSaleAccountUseCase(engine);
+    const updateAccount = new UpdateOpenSaleAccountUseCase(engine);
+    const dispatchSale = new DispatchSaleUseCase(engine);
+    const saleRepo = new IndexedDbSaleRepository(engine);
+    const getOpenSaleDetail = new GetOpenSaleDetailUseCase(saleRepo, engine);
+    const registerEntry = new RegisterMerchandiseEntryUseCase(engine);
+
+    await engine.runTransaction([StoreName.WAREHOUSE_CATEGORIES, StoreName.WAREHOUSE_UNITS], 'readwrite', async (tx) => {
+      await tx.insert(StoreName.WAREHOUSE_CATEGORIES, { id: 'cat-1', name: 'General', normalizedName: 'GENERAL', isSystemCategory: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await tx.insert(StoreName.WAREHOUSE_UNITS, { id: 'unit-1', name: 'Pieza', symbol: 'pza', normalizedName: 'PIEZA', precisionDigits: 0, isSystemUnit: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    });
+
+    await openWorkday.execute(adminActor, {});
+
+    const p = await registerProduct.execute(adminActor, {
+      name: 'Galletas Chocochips',
+      sku: 'SKU-GAL-001',
+      categoryId: 'cat-1',
+      measurementUnitId: 'unit-1',
+      initialQuantity: 5,
+      unitPurchasePrice: 15,
+      declaredSalePrice: 30,
+    });
+
+    // 1. Abrir cuenta con los 5 productos disponibles (el stock del almacén baja a 0)
+    const openAcc = await createAccount.execute(adminActor, {
+      accountName: 'Mesa 10',
+      items: [{ productId: p.id, quantity: 5 }],
+    });
+
+    // Verificar que en almacén el stock es 0
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const liveProd = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p.id);
+      assertEquals(liveProd.currentStock, 0, 'El stock en almacén debe ser 0 tras abrir la cuenta');
+    });
+
+    // 2. Comprobar que GetOpenSaleDetail con sincronización NO bloquea el despacho de la cuenta
+    const detail = await getOpenSaleDetail.executeWithCatalogSync(adminActor, openAcc.sale.id);
+    assertEquals(detail?.hasBlockingIssues, false, 'No debe tener issues que bloqueen el despacho');
+    assertEquals(detail?.lineSyncStatuses[0].blocksDispatch, false, 'La partida no debe bloquear el despacho');
+    assertEquals(detail?.lineSyncStatuses[0].isOutOfStock, false, 'No debe marcarse como agotado para la cuenta');
+    assertEquals(detail?.lineSyncStatuses[0].isInsufficientStock, false, 'No debe marcarse como insuficiente');
+
+    // 3. Despachar la cuenta abierta con stock 0 en almacén debe funcionar perfectamente
+    const dispatchRes = await dispatchSale.execute(adminActor, {
+      saleId: openAcc.sale.id,
+      items: (openAcc.sale.items ?? []).map((i) => ({ productId: i.productId, quantity: i.quantity })),
+    });
+    assertEquals(dispatchRes.sale.status, SaleStatus.DISPATCHED, 'La cuenta debe quedar despachada');
+
+    // 4. Probar adición tras entrada de nueva mercancía
+    // Ingresar 10 unidades nuevas de galletas al almacén
+    await registerEntry.execute(adminActor, {
+      productId: p.id,
+      receivedQuantity: 10,
+      unitPurchasePrice: 15,
+      declaredSalePrice: 30,
+      declaredEntryDate: new Date().toISOString().slice(0, 10),
+    });
+
+    // Crear cuenta con 4 unidades de las 10 recién ingresadas
+    const openAcc2 = await createAccount.execute(adminActor, {
+      accountName: 'Mesa 11',
+      items: [{ productId: p.id, quantity: 4 }],
+    });
+
+    // El almacén debe reflejar 6 unidades restantes
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const liveProd = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p.id);
+      assertEquals(liveProd.currentStock, 6, 'El stock en almacén debe ser 6 tras tomar 4');
+    });
+
+    // Actualizar la cuenta abierta aumentando de 4 a 6 (adición de 2 unidades)
+    const updated = await updateAccount.execute(adminActor, {
+      saleId: openAcc2.sale.id,
+      items: [{ productId: p.id, quantity: 6 }],
+    });
+    assertEquals(updated.sale.items?.[0]?.quantity, 6, 'La cuenta debe tener 6 unidades');
+
+    // El almacén debe reflejar 4 unidades restantes
+    await engine.runTransaction([StoreName.WAREHOUSE_PRODUCTS], 'readonly', async (tx) => {
+      const liveProd = await tx.get<any>(StoreName.WAREHOUSE_PRODUCTS, p.id);
+      assertEquals(liveProd.currentStock, 4, 'El stock en almacén debe ser 4');
+    });
+
+    // Intentar pedir 20 (más de lo que hay en almacén disponible: en cuenta 6 + almacén 4 = 10 max) debe rechazarse
+    await assertRejects(
+      () => updateAccount.execute(adminActor, {
+        saleId: openAcc2.sale.id,
+        items: [{ productId: p.id, quantity: 20 }],
+      }),
+      'supera las existencias disponibles',
+      'Rechazar cantidad superior al stock disponible para adición'
+    );
+
+    tests.push({ name: 'Cuenta abierta con stock 0 en almacén no bloquea despacho y reconoce nueva entrada de mercancía', passed: true, durationMs: Date.now() - start });
+  } catch (err: any) {
+    tests.push({ name: 'Cuenta abierta con stock 0 en almacén no bloquea despacho y reconoce nueva entrada de mercancía', passed: false, durationMs: 0, error: err.message });
   }
 
   const passedCount = tests.filter((t) => t.passed).length;

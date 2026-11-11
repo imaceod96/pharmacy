@@ -228,6 +228,18 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
   }, [hasUnsavedChanges, setNavigationGuard]);
 
   const isEditingOpenAccount = Boolean(selectedSaleId);
+  const selectedSaleRecord = selectedSaleQuery.data?.sale;
+
+  const savedQtyByProductId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (selectedSaleRecord?.items) {
+      for (const item of selectedSaleRecord.items) {
+        map.set(item.productId, item.quantity);
+      }
+    }
+    return map;
+  }, [selectedSaleRecord]);
+
   const activeLines = isEditingOpenAccount ? openAccountLines : newSaleLines;
 
   const updateActiveLines = useCallback(
@@ -244,22 +256,21 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
   );
 
   // Filtrado de productos para el buscador (por nombre, código o SKU)
+  // Muestra todos los productos activos en el almacén (sin límite arbitrario)
   const filteredProducts = useMemo(() => {
     const list = catalogProducts ?? [];
     const query = productSearch.trim().toLowerCase();
 
-    return list
-      .filter((p) => {
-        if (!query) {
-          // Sin texto de búsqueda, mostrar prioritariamente productos activos disponibles
-          return p.status === ProductStatus.ACTIVE && p.stockQuantity > 0;
-        }
-        const matchName = p.name.toLowerCase().includes(query);
-        const matchCode = p.code.toLowerCase().includes(query);
-        const matchSku = (p.sku ?? '').toLowerCase().includes(query);
-        return matchName || matchCode || matchSku;
-      })
-      .slice(0, 12);
+    return list.filter((p) => {
+      if (p.status !== ProductStatus.ACTIVE) return false;
+      if (!query) {
+        return true;
+      }
+      const matchName = p.name.toLowerCase().includes(query);
+      const matchCode = p.code.toLowerCase().includes(query);
+      const matchSku = (p.sku ?? '').toLowerCase().includes(query);
+      return matchName || matchCode || matchSku;
+    });
   }, [catalogProducts, productSearch]);
 
   // Evaluación en tiempo real de cada partida activa frente al catálogo (existencias, estado activo y precio vigente)
@@ -269,14 +280,28 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
       const isProductMissing = !liveProduct;
       const isProductInactive =
         !liveProduct || liveProduct.status !== ProductStatus.ACTIVE;
-      const availableStock = liveProduct?.stockQuantity ?? 0;
-      const isOutOfStock = availableStock <= 0;
-      const isInsufficientStock = line.quantity > availableStock;
+      const warehouseStock = liveProduct?.stockQuantity ?? 0;
+      const savedAccountQty = isEditingOpenAccount
+        ? (savedQtyByProductId.get(line.productId) ?? 0)
+        : 0;
+
+      // Capacidad máxima permitida para esta partida: lo que ya tenía reservado en la cuenta + lo disponible en almacén
+      const maxAllowedQuantity = Math.round((savedAccountQty + warehouseStock) * 100) / 100;
+
+      // Insuficiencia SOLO si se solicita una cantidad superior a la capacidad máxima (lo que ya se tiene + lo que hay en almacén)
+      const isInsufficientStock = line.quantity > maxAllowedQuantity;
+
+      // Para una venta nueva (sin cuenta previa), si no hay stock en almacén está agotado
+      // Para una cuenta abierta existente, lo que ya está en la cuenta ya fue apartado físicamente del almacén
+      const isOutOfStock = !isEditingOpenAccount && warehouseStock <= 0;
+
       const currentCatalogPrice = liveProduct?.salePrice ?? line.unitSalePrice;
       const hasPriceChanged =
         Math.abs(currentCatalogPrice - line.unitSalePrice) > 0.001;
+
+      // Bloquea el despacho SOLO si el producto no existe, está inactivo o si la cantidad excede la capacidad permitida
       const blocksDispatch =
-        isProductMissing || isProductInactive || isOutOfStock || isInsufficientStock;
+        isProductMissing || isProductInactive || isInsufficientStock;
 
       let issueText: string | null = null;
       if (isProductMissing) {
@@ -284,11 +309,12 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
       } else if (isProductInactive) {
         issueText =
           'Producto inactivo en almacén. Debes retirarlo de la cuenta para poder despachar.';
-      } else if (isOutOfStock) {
-        issueText =
-          'Producto agotado (existencia disponible: 0). Retíralo para poder despachar.';
       } else if (isInsufficientStock) {
-        issueText = `Existencia insuficiente: disponible ${availableStock} ${line.unitLabel}, solicitado ${line.quantity} ${line.unitLabel}.`;
+        if (isEditingOpenAccount) {
+          issueText = `Existencias insuficientes para la adición: en cuenta hay ${savedAccountQty} ${line.unitLabel}, en almacén quedan ${warehouseStock} ${line.unitLabel} (máximo disponible: ${maxAllowedQuantity} ${line.unitLabel}).`;
+        } else {
+          issueText = `Existencia insuficiente en almacén: disponible ${warehouseStock} ${line.unitLabel}, solicitado ${line.quantity} ${line.unitLabel}.`;
+        }
       }
 
       const lineSubtotal =
@@ -298,7 +324,9 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
 
       return {
         ...line,
-        availableStock,
+        availableStock: warehouseStock,
+        savedAccountQty,
+        maxAllowedQuantity,
         isProductInactive,
         isOutOfStock,
         isInsufficientStock,
@@ -310,7 +338,7 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
         catalogSubtotal,
       };
     });
-  }, [activeLines, productById]);
+  }, [activeLines, productById, isEditingOpenAccount, savedQtyByProductId]);
 
   const hasBlockingLineIssues = useMemo(
     () => evaluatedLines.some((l) => l.blocksDispatch),
@@ -378,13 +406,19 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
     }
 
     const existingLine = activeLines.find((l) => l.productId === product.id);
-    const nextTotalQuantity = existingLine
-      ? Math.round((existingLine.quantity + validQtyToAdd) * 100) / 100
-      : validQtyToAdd;
+    const currentQtyInDraft = existingLine?.quantity ?? 0;
+    const savedQty = isEditingOpenAccount
+      ? (savedQtyByProductId.get(product.id) ?? 0)
+      : 0;
+    const warehouseStock = product.stockQuantity;
+    const maxAllowed = Math.round((savedQty + warehouseStock) * 100) / 100;
+    const nextTotalQuantity = Math.round((currentQtyInDraft + validQtyToAdd) * 100) / 100;
 
-    if (nextTotalQuantity > product.stockQuantity) {
+    if (nextTotalQuantity > maxAllowed) {
       setWorkspaceError(
-        `No puedes agregar ${validQtyToAdd} ${product.unitLabel} de "${product.name}". Cantidad acumulada (${nextTotalQuantity}) supera la existencia disponible (${product.stockQuantity}).`
+        isEditingOpenAccount
+          ? `No puedes agregar ${validQtyToAdd} ${product.unitLabel} de "${product.name}". En almacén solo quedan ${warehouseStock} ${product.unitLabel} disponibles para agregar (en la cuenta ya hay ${savedQty} ${product.unitLabel}).`
+          : `No puedes agregar ${validQtyToAdd} ${product.unitLabel} de "${product.name}". Cantidad solicitada (${nextTotalQuantity}) supera la existencia disponible (${warehouseStock}).`
       );
       return;
     }
@@ -451,16 +485,20 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
   const handleStepLineQuantity = (productId: string, delta: number) => {
     setWorkspaceError(null);
     const liveProduct = productById.get(productId);
-    const maxStock = liveProduct?.stockQuantity ?? Infinity;
+    const warehouseStock = liveProduct?.stockQuantity ?? 0;
+    const savedQty = isEditingOpenAccount
+      ? (savedQtyByProductId.get(productId) ?? 0)
+      : 0;
+    const maxAllowed = Math.round((savedQty + warehouseStock) * 100) / 100;
 
     updateActiveLines((prev) =>
       prev.map((line) => {
         if (line.productId !== productId) return line;
         const nextQty = Math.round((line.quantity + delta) * 100) / 100;
         if (nextQty <= 0) return line;
-        if (nextQty > maxStock) {
+        if (nextQty > maxAllowed) {
           setWorkspaceError(
-            `La cantidad para "${line.productName}" no puede superar las existencias disponibles (${maxStock}).`
+            `No es posible aumentar más la cantidad para "${line.productName}". Existencias en almacén disponibles para agregar: ${warehouseStock} ${line.unitLabel}.`
           );
           return line;
         }
@@ -518,15 +556,18 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
         );
         return false;
       }
-      if (live.stockQuantity <= 0) {
+
+      const warehouseStock = live.stockQuantity;
+      const savedQty = isEditingOpenAccount
+        ? (savedQtyByProductId.get(line.productId) ?? 0)
+        : 0;
+      const maxAllowed = Math.round((savedQty + warehouseStock) * 100) / 100;
+
+      if (parsed > maxAllowed) {
         setWorkspaceError(
-          `El producto "${line.productName}" se encuentra agotado en almacén.`
-        );
-        return false;
-      }
-      if (parsed > live.stockQuantity) {
-        setWorkspaceError(
-          `Existencias insuficientes para "${line.productName}": disponible ${live.stockQuantity}, solicitado ${parsed}.`
+          isEditingOpenAccount
+            ? `Existencias insuficientes para "${line.productName}": en la cuenta ya hay ${savedQty} y en almacén quedan ${warehouseStock} (máximo permitido: ${maxAllowed}).`
+            : `Existencias insuficientes para "${line.productName}": disponible en almacén ${warehouseStock}, solicitado ${parsed}.`
         );
         return false;
       }
@@ -755,7 +796,6 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
   };
 
   const openAccountsCount = openSalesList?.length ?? 0;
-  const selectedSaleRecord = selectedSaleQuery.data?.sale;
 
   const directoryColumns: readonly TableColumn<SaleRecord>[] = [
     {
@@ -1118,8 +1158,8 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
           <div className="space-y-4 lg:col-span-5">
             <Card>
               <CardHeader
-                title="Catálogo de productos para venta"
-                description="Busca por nombre, código o SKU. Solo se pueden agregar productos activos con existencia disponible."
+                title={`Catálogo de productos para venta (${filteredProducts.length})`}
+                description="Busca por nombre, código o SKU. Todos los productos activos del almacén."
               />
               <CardBody className="space-y-4 pt-0">
                 <TextInput
@@ -1387,11 +1427,22 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
                                 <span>Unidad: {line.unitLabel}</span>
                                 <span>·</span>
                                 <span>
-                                  Disp.:{' '}
+                                  Almacén:{' '}
                                   <strong className="font-mono text-slate-700">
                                     {line.availableStock}
                                   </strong>
                                 </span>
+                                {isEditingOpenAccount && (
+                                  <>
+                                    <span>·</span>
+                                    <span>
+                                      En cuenta:{' '}
+                                      <strong className="font-mono text-[#1A5F7A]">
+                                        {line.savedAccountQty}
+                                      </strong>
+                                    </span>
+                                  </>
+                                )}
                               </div>
                               {line.issueText && (
                                 <div className="mt-1 rounded bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-800">
@@ -1442,7 +1493,7 @@ export function OpenSalesPage({ selectedSaleId }: OpenSalesPageProps) {
                                   onClick={() =>
                                     handleStepLineQuantity(line.productId, 1)
                                   }
-                                  disabled={line.quantity >= line.availableStock}
+                                  disabled={line.quantity >= line.maxAllowedQuantity}
                                   className="flex h-7 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
                                 >
                                   <Plus className="h-3 w-3" />

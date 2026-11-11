@@ -99,12 +99,13 @@ export class GetOpenSaleDetailUseCase {
           }
 
           const isProductInactive = product.status !== ProductStatus.ACTIVE;
-          const isOutOfStock = product.currentStock <= 0;
-          const isInsufficientStock = item.quantity > product.currentStock;
+          // Las existencias de una cuenta abierta ya fueron apartadas del almacén físico.
+          // Por tanto, tener 0 en almacén no bloquea el despacho de lo que ya está en la cuenta.
+          const isOutOfStock = false;
+          const isInsufficientStock = false;
           const hasPriceChanged =
             Math.abs(product.currentSalePrice - item.unitSalePrice) > 0.001;
-          const blocksDispatch =
-            isProductInactive || isOutOfStock || isInsufficientStock;
+          const blocksDispatch = isProductInactive;
 
           if (blocksDispatch) {
             hasBlockingIssues = true;
@@ -117,11 +118,6 @@ export class GetOpenSaleDetailUseCase {
           if (isProductInactive) {
             statusMessage =
               'Producto desactivado en almacén. Retíralo de la cuenta para poder despachar.';
-          } else if (isOutOfStock) {
-            statusMessage =
-              'Producto agotado en almacén (existencia disponible: 0). Retíralo para poder despachar.';
-          } else if (isInsufficientStock) {
-            statusMessage = `Existencia insuficiente: disponible ${product.currentStock}, solicitado ${item.quantity}. Ajusta la cantidad.`;
           } else if (hasPriceChanged) {
             statusMessage = `El precio en catálogo cambió de $${item.unitSalePrice.toFixed(2)} a $${product.currentSalePrice.toFixed(2)}.`;
           }
