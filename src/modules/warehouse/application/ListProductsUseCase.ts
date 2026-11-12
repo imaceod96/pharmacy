@@ -68,6 +68,7 @@ export class ListProductsUseCase {
         salePrice: product.currentSalePrice,
         status: product.status,
         availability: calculateProductAvailability(product.status, product.currentStock),
+        expirationDate: product.expirationDate ?? null,
         updatedAt: product.updatedAt,
       };
 

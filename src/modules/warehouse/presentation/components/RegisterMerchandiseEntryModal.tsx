@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Calendar, DollarSign, Layers, Package, TrendingUp } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Calendar, DollarSign, Layers, Package, TrendingUp } from 'lucide-react';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
 import { Button } from '../../../../shared/components/Button';
 import { FormField, TextInput } from '../../../../shared/components/FormField';
 import { Modal } from '../../../../shared/components/Modal';
 import { Permission } from '../../../../shared/types/permissions';
-import { getTodayLocalDateString, isFutureDate } from '../../../../shared/utils/date';
+import { getExpirationStatus, getTodayLocalDateString, isFutureDate } from '../../../../shared/utils/date';
 import { generateEntityId } from '../../../../shared/utils/id';
 import {
   calculateProfitMarginPercentage,
@@ -38,6 +38,7 @@ export function RegisterMerchandiseEntryModal({
   const [unitPurchasePrice, setUnitPurchasePrice] = useState<string>('');
   const [declaredSalePrice, setDeclaredSalePrice] = useState<string>('');
   const [declaredEntryDate, setDeclaredEntryDate] = useState<string>(getTodayLocalDateString());
+  const [expirationDate, setExpirationDate] = useState<string>('');
 
   // Idempotency token generated upon opening the modal
   const [operationId, setOperationId] = useState<string>(() => generateEntityId());
@@ -53,10 +54,16 @@ export function RegisterMerchandiseEntryModal({
       setUnitPurchasePrice('');
       setDeclaredSalePrice('');
       setDeclaredEntryDate(getTodayLocalDateString());
+      setExpirationDate(product?.expirationDate || '');
       setFormError(null);
       setOperationId(generateEntityId());
     }
-  }, [isOpen, product?.id]);
+  }, [isOpen, product?.id, product?.expirationDate]);
+
+  const expirationStatus = useMemo(
+    () => getExpirationStatus(expirationDate),
+    [expirationDate]
+  );
 
   const handleClose = () => {
     if (isSubmitting) return;
@@ -179,6 +186,7 @@ export function RegisterMerchandiseEntryModal({
         unitPurchasePrice: parsedPurchasePrice,
         declaredSalePrice: parsedSalePrice,
         declaredEntryDate,
+        expirationDate: expirationDate.trim() || null,
       });
 
       notifyDataChanged();
@@ -372,7 +380,57 @@ export function RegisterMerchandiseEntryModal({
               required
             />
           </FormField>
+
+          <FormField
+            id="entry-expiration-date"
+            label="Fecha de vencimiento (Mes y Año)"
+            helperText="Solo mes y año (sin día). Alerta preventiva automática con 1 año o menos."
+          >
+            <TextInput
+              id="entry-expiration-date"
+              type="month"
+              placeholder="AAAA-MM"
+              value={expirationDate ? expirationDate.slice(0, 7) : ''}
+              onChange={(e) => setExpirationDate(e.target.value)}
+              disabled={isSubmitting}
+              leadingIcon={<Calendar className="h-4 w-4" />}
+            />
+          </FormField>
         </div>
+
+        {expirationDate && (
+          <div
+            className={`flex items-start gap-2.5 rounded-lg border p-3 text-xs ${
+              expirationStatus.status === 'EXPIRED'
+                ? 'border-red-300 bg-red-50 text-red-900'
+                : expirationStatus.isAlert
+                ? 'border-amber-300 bg-amber-50 text-amber-900'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            }`}
+          >
+            {expirationStatus.status === 'EXPIRED' ? (
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+            ) : expirationStatus.isAlert ? (
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+            ) : (
+              <Calendar className="h-4 w-4 shrink-0 text-emerald-600 mt-0.5" />
+            )}
+            <div>
+              <span className="font-semibold">
+                {expirationStatus.status === 'EXPIRED'
+                  ? '¡Atención: Producto vencido!'
+                  : expirationStatus.isAlert
+                  ? '⚠️ Alerta preventiva de vencimiento (≤ 1 año):'
+                  : 'Fecha de vencimiento registrada:'}
+              </span>{' '}
+              {expirationStatus.status === 'EXPIRED'
+                ? 'La fecha seleccionada ya caducó. Verifique el lote ingresado.'
+                : expirationStatus.isAlert
+                ? `A este lote le quedan ${expirationStatus.daysRemaining} días (${expirationStatus.label}) para vencer. El producto se marcará con alerta preventiva en el listado.`
+                : `${expirationStatus.label}. Vencimiento seguro a más de 1 año.`}
+            </div>
+          </div>
+        )}
 
         {/* Resumen económico en tiempo real */}
         <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4 space-y-3">

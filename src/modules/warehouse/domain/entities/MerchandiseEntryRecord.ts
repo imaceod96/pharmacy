@@ -8,6 +8,7 @@ export interface MerchandiseEntryRecord {
   readonly declaredSalePrice: number;
   readonly totalEntryCost: number;
   readonly declaredEntryDate: string;
+  readonly expirationDate?: string | null;
   readonly registeredAt: ISODateString;
   readonly responsibleUserId: string;
 }

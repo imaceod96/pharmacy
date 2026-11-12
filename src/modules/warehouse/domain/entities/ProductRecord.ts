@@ -22,6 +22,7 @@ export interface ProductRecord extends BaseEntity {
   readonly currentSalePrice: number;
   readonly status: ProductStatus;
   readonly availability?: ProductAvailability;
+  readonly expirationDate?: string | null;
 }
 
 /**
@@ -54,5 +55,6 @@ export interface ProductCatalogViewItem {
   readonly marginPercentage?: number;
   readonly status: ProductStatus;
   readonly availability: ProductAvailability;
+  readonly expirationDate?: string | null;
   readonly updatedAt: ISODateString;
 }

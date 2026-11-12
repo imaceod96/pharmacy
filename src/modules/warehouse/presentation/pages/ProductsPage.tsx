@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
@@ -27,6 +29,7 @@ import { TextInput } from '../../../../shared/components/FormField';
 import { PageHeader } from '../../../../shared/components/PageHeader';
 import { useAsyncQuery } from '../../../../shared/hooks/useAsyncQuery';
 import { Permission } from '../../../../shared/types/permissions';
+import { formatSimpleDate, getExpirationStatus } from '../../../../shared/utils/date';
 import {
   ProductAvailability,
   ProductCatalogViewItem,
@@ -42,7 +45,8 @@ import { ProductStatusChangeModal } from '../components/ProductStatusChangeModal
 import { RegisterMerchandiseEntryModal } from '../components/RegisterMerchandiseEntryModal';
 import { ExcelImportModal } from '../components/ExcelImportModal';
 
-const ITEMS_PER_PAGE = 25;
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+export type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];
 
 export function ProductsPage() {
   const { actor, can } = useSession();
@@ -51,6 +55,8 @@ export function ProductsPage() {
 
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<PageSizeOption>(25);
+  const [filterTab, setFilterTab] = useState<'ALL' | 'ACTIVE' | 'OUT_OF_STOCK' | 'NEAR_EXPIRATION'>('ALL');
   const [isNewEntryModalOpen, setIsNewEntryModalOpen] = useState<boolean>(false);
   const [selectedProductForEntry, setSelectedProductForEntry] = useState<ProductCatalogViewItem | null>(null);
   const [selectedProductForPriceEdit, setSelectedProductForPriceEdit] = useState<ProductCatalogViewItem | null>(null);
@@ -94,6 +100,13 @@ export function ProductsPage() {
     [useCases.warehouse.listProducts, actor, dataRevision]
   );
 
+  const productsWithExpirationAlert = useMemo(() => {
+    return (products ?? []).filter((item) => {
+      if (!item.expirationDate) return false;
+      return getExpirationStatus(item.expirationDate).isAlert;
+    });
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
     const items = products ?? [];
     const query = searchTerm.trim().toLowerCase();
@@ -107,6 +120,18 @@ export function ProductsPage() {
           item.categoryLabel.toLowerCase().includes(query)
       );
     }
+
+    if (filterTab === 'ACTIVE') {
+      result = result.filter((item) => item.status === ProductStatus.ACTIVE);
+    } else if (filterTab === 'OUT_OF_STOCK') {
+      result = result.filter((item) => item.stockQuantity <= 0);
+    } else if (filterTab === 'NEAR_EXPIRATION') {
+      result = result.filter((item) => {
+        if (!item.expirationDate) return false;
+        return getExpirationStatus(item.expirationDate).isAlert;
+      });
+    }
+
     // Garantizar que los productos inactivos siempre se ubiquen al final
     return result.slice().sort((a, b) => {
       if (a.status !== b.status) {
@@ -114,17 +139,17 @@ export function ProductsPage() {
       }
       return a.name.localeCompare(b.name, 'es');
     });
-  }, [products, searchTerm]);
+  }, [products, searchTerm, filterTab]);
 
-  // Paginación a 25 registros por página
+  // Paginación dinámica según selección de usuario [10, 25, 50, 100]
   const totalItems = filteredProducts.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedProducts = useMemo(() => {
-    const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
-    return filteredProducts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredProducts, safeCurrentPage]);
+    const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+    return filteredProducts.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProducts, safeCurrentPage, itemsPerPage]);
 
   const handleSearchChange = (value: string) => {
     setSearchTerm(value);
@@ -237,6 +262,42 @@ export function ProductsPage() {
             {item.stockQuantity.toFixed(2)}
           </span>
         ),
+      },
+      {
+        key: 'expirationDate',
+        header: 'Vencimiento',
+        align: 'left',
+        render: (item) => {
+          if (!item.expirationDate) {
+            return <span className="text-xs text-slate-400 font-mono">—</span>;
+          }
+          const exp = getExpirationStatus(item.expirationDate);
+          return (
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-slate-800">
+                <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                <span>{formatSimpleDate(item.expirationDate)}</span>
+              </div>
+              {exp.isAlert ? (
+                <span
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    exp.status === 'EXPIRED'
+                      ? 'bg-red-100 text-red-800 border border-red-300'
+                      : 'bg-amber-100 text-amber-900 border border-amber-300'
+                  }`}
+                  title={exp.status === 'EXPIRED' ? 'Producto vencido' : 'Queda 1 año o menos para vencer'}
+                >
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  {exp.label}
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-500 font-medium">
+                  {exp.label}
+                </span>
+              )}
+            </div>
+          );
+        },
       },
     ];
 
@@ -534,8 +595,8 @@ export function ProductsPage() {
     return cols;
   }, [canManageProducts, canViewCosts, activeMenuProductId]);
 
-  const showingStart = totalItems === 0 ? 0 : (safeCurrentPage - 1) * ITEMS_PER_PAGE + 1;
-  const showingEnd = Math.min(safeCurrentPage * ITEMS_PER_PAGE, totalItems);
+  const showingStart = totalItems === 0 ? 0 : (safeCurrentPage - 1) * itemsPerPage + 1;
+  const showingEnd = Math.min(safeCurrentPage * itemsPerPage, totalItems);
 
   return (
     <div className="space-y-6">
@@ -600,26 +661,147 @@ export function ProductsPage() {
         </div>
       )}
 
+      {productsWithExpirationAlert.length > 0 && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50/95 p-4 text-xs text-amber-950 shadow-xs"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-800 border border-amber-300">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-amber-900 text-sm">
+                Alerta de Vencimiento Preventiva: {productsWithExpirationAlert.length}{' '}
+                {productsWithExpirationAlert.length === 1 ? 'producto tiene' : 'productos tienen'} 1 año o menos para vencer (o ya vencidos)
+              </h4>
+              <p className="mt-0.5 text-amber-800">
+                Se detectaron artículos con proximidad de vencimiento en almacén. Revise la lista para priorizar su venta o coordinar devoluciones.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={filterTab === 'NEAR_EXPIRATION' ? 'primary' : 'secondary'}
+              size="sm"
+              icon={<AlertTriangle className="h-3.5 w-3.5" />}
+              onClick={() => {
+                setFilterTab((curr) => (curr === 'NEAR_EXPIRATION' ? 'ALL' : 'NEAR_EXPIRATION'));
+                setCurrentPage(1);
+              }}
+            >
+              {filterTab === 'NEAR_EXPIRATION'
+                ? 'Ver todo el catálogo'
+                : `Ver artículos con alerta (${productsWithExpirationAlert.length})`}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
-          <div className="w-full max-w-sm">
-            <TextInput
-              aria-label="Buscar producto por código, SKU o nombre"
-              placeholder="Buscar por código, SKU o nombre…"
-              value={searchTerm}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              leadingIcon={<Search className="h-4 w-4" />}
-            />
+        {/* Barra de Filtros y Búsqueda */}
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="w-full max-w-sm">
+              <TextInput
+                aria-label="Buscar producto por código, SKU o nombre"
+                placeholder="Buscar por código, SKU o nombre…"
+                value={searchTerm}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                leadingIcon={<Search className="h-4 w-4" />}
+              />
+            </div>
+
+            {/* Selector de cantidad de productos a ver a la vez [10, 25, 50, 100] */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-slate-600 font-medium">Ver a la vez:</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5" role="group" aria-label="Cantidad de productos por página">
+                {PAGE_SIZE_OPTIONS.map((size) => {
+                  const isSelected = itemsPerPage === size;
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => {
+                        setItemsPerPage(size);
+                        setCurrentPage(1);
+                      }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#123F55] text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+                      }`}
+                      aria-label={`Ver ${size} productos a la vez`}
+                    >
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
-          <div className="text-xs text-slate-500">
-            <span>Vista: {actor.label}</span>
-            <span aria-hidden="true" className="mx-2">
-              ·
-            </span>
-            <span className="tabular-nums">
-              {totalItems} {totalItems === 1 ? 'producto' : 'productos'}
-            </span>
+          {/* Filtros rápidos: Todos, Activos, Agotados, Próximos a vencer */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setFilterTab('ALL');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                filterTab === 'ALL'
+                  ? 'bg-[#1A5F7A] text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Todos ({products?.length ?? 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFilterTab('ACTIVE');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                filterTab === 'ACTIVE'
+                  ? 'bg-[#1A5F7A] text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Activos ({products?.filter((p) => p.status === ProductStatus.ACTIVE).length ?? 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFilterTab('OUT_OF_STOCK');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                filterTab === 'OUT_OF_STOCK'
+                  ? 'bg-[#1A5F7A] text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Agotados ({products?.filter((p) => p.stockQuantity <= 0).length ?? 0})
+            </button>
+            {productsWithExpirationAlert.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterTab('NEAR_EXPIRATION');
+                  setCurrentPage(1);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                  filterTab === 'NEAR_EXPIRATION'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-300'
+                }`}
+              >
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>Alerta Vencimiento ≤ 1 año ({productsWithExpirationAlert.length})</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -632,15 +814,19 @@ export function ProductsPage() {
           emptyTitle={
             searchTerm.trim()
               ? 'No se encontraron productos con ese criterio'
+              : filterTab === 'NEAR_EXPIRATION'
+              ? 'No hay productos con alerta de vencimiento (≤ 1 año)'
               : 'No hay productos registrados en el almacén'
           }
           emptyDescription={
             searchTerm.trim()
               ? 'Intente con otro código o nombre de artículo.'
+              : filterTab === 'NEAR_EXPIRATION'
+              ? 'Todos los productos con fecha de vencimiento registrada tienen más de 1 año de vigencia.'
               : 'El catálogo se encuentra vacío. Registre el primer producto mediante el botón "+ Nueva Mercancía".'
           }
           emptyAction={
-            !searchTerm.trim() && canManageProducts ? (
+            !searchTerm.trim() && filterTab !== 'NEAR_EXPIRATION' && canManageProducts ? (
               <Button
                 variant="secondary"
                 size="sm"
@@ -653,13 +839,19 @@ export function ProductsPage() {
           }
         />
 
-        {/* Paginación a 25 registros */}
+        {/* Paginación dinámica según itemsPerPage [10, 25, 50, 100] */}
         {totalItems > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-3.5 text-xs text-slate-600">
-            <div>
-              Mostrando <strong className="font-semibold text-slate-800 tabular-nums">{showingStart}</strong> -{' '}
-              <strong className="font-semibold text-slate-800 tabular-nums">{showingEnd}</strong> de{' '}
-              <strong className="font-semibold text-slate-800 tabular-nums">{totalItems}</strong> productos
+            <div className="flex items-center gap-3">
+              <div>
+                Mostrando <strong className="font-semibold text-slate-800 tabular-nums">{showingStart}</strong> -{' '}
+                <strong className="font-semibold text-slate-800 tabular-nums">{showingEnd}</strong> de{' '}
+                <strong className="font-semibold text-slate-800 tabular-nums">{totalItems}</strong> productos
+              </div>
+              <div className="hidden sm:flex items-center gap-1.5 pl-3 border-l border-slate-200 text-slate-500">
+                <span>Por página:</span>
+                <span className="font-bold text-[#123F55]">{itemsPerPage}</span>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">

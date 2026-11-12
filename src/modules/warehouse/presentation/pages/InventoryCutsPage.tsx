@@ -17,7 +17,6 @@ import {
   Search,
   XCircle,
 } from 'lucide-react';
-import { MorningStockVerificationModal } from '../components/MorningStockVerificationModal';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
 import { ROUTES } from '../../../../app/router/routes';
@@ -65,7 +64,6 @@ export function InventoryCutsPage() {
   const [blockedOpenAccounts, setBlockedOpenAccounts] = useState<
     readonly PendingOpenAccountSummary[]
   >([]);
-  const [isMorningVerificationOpen, setIsMorningVerificationOpen] = useState<boolean>(false);
 
   // Filtros del historial de jornadas
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -501,17 +499,7 @@ export function InventoryCutsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Inventarios / Corte"
-        subtitle="Control de jornadas operativas, cortes parciales con conteo ciego y expedientes digitales."
-        actions={
-          <Button
-            variant="secondary"
-            size="md"
-            icon={<ClipboardCheck className="h-4 w-4 text-[#1A5F7A]" />}
-            onClick={() => setIsMorningVerificationOpen(true)}
-          >
-            Conteo matutino
-          </Button>
-        }
+        subtitle="Control de jornadas operativas, cortes parciales con conteo ciego y expedientes digitales de cierre."
       />
 
       {/* BLOQUE A: ESTADO DE LA JORNADA OPERATIVA ACTUAL */}
@@ -875,14 +863,6 @@ export function InventoryCutsPage() {
           )}
         </form>
       </Modal>
-
-      <MorningStockVerificationModal
-        isOpen={isMorningVerificationOpen}
-        onClose={() => setIsMorningVerificationOpen(false)}
-        onSuccess={() => {
-          notifyDataChanged();
-        }}
-      />
     </div>
   );
 }

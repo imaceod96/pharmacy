@@ -32,6 +32,7 @@ export interface RegisterProductWithInitialEntryInput {
   readonly unitPurchasePrice: number;
   readonly declaredSalePrice: number;
   readonly declaredEntryDate?: string;
+  readonly expirationDate?: string | null;
 }
 
 export class RegisterProductWithInitialEntryUseCase {
@@ -56,6 +57,7 @@ export class RegisterProductWithInitialEntryUseCase {
 
     // 2. Validar SKU si está informado
     const trimmedSku = input.sku ? input.sku.trim() : null;
+    const expirationDate = input.expirationDate ? input.expirationDate.trim() : null;
 
     // 3. Validar cantidades y precios con reglas seguras
     validateQuantity(input.initialQuantity, 'La cantidad de entrada inicial');
@@ -81,6 +83,7 @@ export class RegisterProductWithInitialEntryUseCase {
       lastPurchasePrice: input.unitPurchasePrice,
       currentSalePrice: salePrice,
       status: ProductStatus.ACTIVE,
+      expirationDate,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -93,6 +96,7 @@ export class RegisterProductWithInitialEntryUseCase {
       declaredSalePrice: salePrice,
       totalEntryCost,
       declaredEntryDate,
+      expirationDate,
       registeredAt: timestamp,
       responsibleUserId: actor.label,
     };
@@ -181,6 +185,7 @@ export class RegisterProductWithInitialEntryUseCase {
           originalQuantity: input.initialQuantity,
           remainingQuantity: input.initialQuantity,
           unitPurchaseCost: input.unitPurchasePrice,
+          expirationDate,
           createdAt: timestamp,
           updatedAt: timestamp,
           auditRef: 'INITIAL_ENTRY',

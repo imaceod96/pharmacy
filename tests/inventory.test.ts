@@ -252,6 +252,58 @@ export async function runInventoryTests(): Promise<TestSuiteResult> {
     tests.push({ name: 'Activación y desactivación de productos', passed: false, durationMs: 0, error: err.message });
   }
 
+  // Test 7: Registro con fecha de vencimiento y cálculo de alerta preventiva (≤ 1 año)
+  try {
+    const start = Date.now();
+    const engine = await createTestEngine();
+    const registerProduct = new RegisterProductWithInitialEntryUseCase(engine);
+    const registerEntry = new RegisterMerchandiseEntryUseCase(engine);
+
+    await engine.runTransaction([StoreName.WAREHOUSE_CATEGORIES, StoreName.WAREHOUSE_UNITS], 'readwrite', async (tx) => {
+      await tx.insert(StoreName.WAREHOUSE_CATEGORIES, { id: 'cat-farmacia', name: 'Farmacia', normalizedName: 'FARMACIA', isSystemCategory: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await tx.insert(StoreName.WAREHOUSE_UNITS, { id: 'unit-caja', name: 'Caja', symbol: 'caja', normalizedName: 'CAJA', precisionDigits: 0, isSystemUnit: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    });
+
+    // Fecha a 6 meses en formato Mes/Año YYYY-MM (debe generar alerta preventiva)
+    const inSixMonths = new Date();
+    inSixMonths.setMonth(inSixMonths.getMonth() + 6);
+    const expDateSixMonths = inSixMonths.toISOString().slice(0, 7);
+
+    const productWithExp = await registerProduct.execute(adminActor, {
+      name: 'Amoxicilina 500mg',
+      sku: 'MED-AMOX-500',
+      categoryId: 'cat-farmacia',
+      measurementUnitId: 'unit-caja',
+      initialQuantity: 30,
+      unitPurchasePrice: 40,
+      declaredSalePrice: 70,
+      expirationDate: expDateSixMonths,
+    });
+
+    assertEquals(productWithExp.expirationDate, expDateSixMonths);
+
+    // Entrada de mercancía actualizando lote con fecha a 2 años en formato Mes/Año (sin alerta)
+    const inTwoYears = new Date();
+    inTwoYears.setFullYear(inTwoYears.getFullYear() + 2);
+    const expDateTwoYears = inTwoYears.toISOString().slice(0, 7);
+
+    const entryRes = await registerEntry.execute(adminActor, {
+      productId: productWithExp.id,
+      receivedQuantity: 20,
+      unitPurchasePrice: 42,
+      declaredSalePrice: 75,
+      declaredEntryDate: new Date().toISOString().slice(0, 10),
+      expirationDate: expDateTwoYears,
+    });
+
+    assertEquals(entryRes.product.expirationDate, expDateTwoYears);
+    assertEquals(entryRes.entry.expirationDate, expDateTwoYears);
+
+    tests.push({ name: 'Fecha de vencimiento en entradas y alerta preventiva', passed: true, durationMs: Date.now() - start });
+  } catch (err: any) {
+    tests.push({ name: 'Fecha de vencimiento en entradas y alerta preventiva', passed: false, durationMs: 0, error: err.message });
+  }
+
   const passedCount = tests.filter((t) => t.passed).length;
   return {
     name: 'PRUEBAS DE INVENTARIO',

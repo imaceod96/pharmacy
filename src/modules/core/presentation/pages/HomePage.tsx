@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -15,7 +15,6 @@ import {
   User,
   XCircle,
 } from 'lucide-react';
-import { MorningStockVerificationModal } from '../../../warehouse/presentation/components/MorningStockVerificationModal';
 import { useApplication } from '../../../../app/providers/ApplicationProvider';
 import { useSession } from '../../../../app/providers/SessionProvider';
 import { ROUTES } from '../../../../app/router/routes';
@@ -28,7 +27,7 @@ import { Modal } from '../../../../shared/components/Modal';
 import { PageHeader } from '../../../../shared/components/PageHeader';
 import { useAsyncQuery } from '../../../../shared/hooks/useAsyncQuery';
 import { Permission } from '../../../../shared/types/permissions';
-import { formatDateTime, nowISO } from '../../../../shared/utils/date';
+import { formatDateTime, getExpirationStatus, nowISO } from '../../../../shared/utils/date';
 import { formatCurrency } from '../../../../shared/utils/money';
 import {
   formatSaleDisplayLabel,
@@ -55,7 +54,6 @@ export function HomePage() {
   const [isSubmittingWorkday, setIsSubmittingWorkday] = useState<boolean>(false);
   const [workdayError, setWorkdayError] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
-  const [isMorningVerificationOpen, setIsMorningVerificationOpen] = useState<boolean>(false);
 
   // Modal de bloqueo o preparación para el cierre de jornada e inventario final
   const [closingBlockModal, setClosingBlockModal] = useState<{
@@ -107,6 +105,20 @@ export function HomePage() {
     () => useCases.sales.getDashboardSummary.execute(actor, activeWorkdayId),
     [useCases.sales.getDashboardSummary, actor, activeWorkdayId, dataRevision]
   );
+
+  const { data: allProducts } = useAsyncQuery(
+    () =>
+      can(Permission.VIEW_PRODUCTS)
+        ? useCases.warehouse.listProducts.execute(actor)
+        : Promise.resolve([]),
+    [useCases.warehouse.listProducts, actor, can, dataRevision]
+  );
+
+  const expiringProducts = useMemo(() => {
+    return (allProducts ?? []).filter(
+      (p) => p.expirationDate && getExpirationStatus(p.expirationDate).isAlert
+    );
+  }, [allProducts]);
 
   // 3. Regla obligatoria: validación de jornada para ventas
   const salesValidation = validateActiveWorkdayForSales(activeWorkday);
@@ -239,6 +251,36 @@ export function HomePage() {
         </div>
       )}
 
+      {expiringProducts.length > 0 && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50/95 p-4 text-xs text-amber-950 shadow-xs"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-800 border border-amber-300">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-amber-900 text-sm">
+                Alerta de Almacén: {expiringProducts.length}{' '}
+                {expiringProducts.length === 1 ? 'producto próximo' : 'productos próximos'} a vencer (≤ 1 año)
+              </h4>
+              <p className="mt-0.5 text-amber-800">
+                Se detectaron artículos con fecha de caducidad en 1 año o menos (o ya vencidos). Verifique el inventario para priorizar su rotación.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<ArrowRight className="h-3.5 w-3.5" />}
+            onClick={() => navigate(ROUTES.warehouseProducts)}
+          >
+            Ver productos en Almacén
+          </Button>
+        </div>
+      )}
+
       {/* ============================================================ */}
       {/* PARTE 1 — CONTROL DE JORNADA EN INICIO (ZONA SUPERIOR)       */}
       {/* ============================================================ */}
@@ -267,15 +309,6 @@ export function HomePage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <Button
-                  variant="secondary"
-                  size="md"
-                  icon={<ClipboardCheck className="h-4 w-4 text-[#1A5F7A]" />}
-                  onClick={() => setIsMorningVerificationOpen(true)}
-                >
-                  Conteo matutino
-                </Button>
-
                 <Button
                   variant="primary"
                   size="md"
@@ -836,16 +869,6 @@ export function HomePage() {
       >
         <p className="text-xs leading-relaxed text-slate-600">{noticeModal.content}</p>
       </Modal>
-
-      {/* Modal 4: Conteo Matutino de Existencias */}
-      <MorningStockVerificationModal
-        isOpen={isMorningVerificationOpen}
-        onClose={() => setIsMorningVerificationOpen(false)}
-        onSuccess={() => {
-          notifyDataChanged();
-          void reloadWorkday();
-        }}
-      />
     </div>
   );
 }

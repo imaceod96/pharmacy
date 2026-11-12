@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Boxes,
@@ -20,6 +20,7 @@ import { OutOfStockAlertModal } from '../../modules/warehouse/presentation/compo
 import { useAsyncQuery } from '../../shared/hooks/useAsyncQuery';
 import { ROLE_LABELS } from '../../shared/lib/permissions/rolePolicy';
 import { Permission, UserRole } from '../../shared/types/permissions';
+import { getExpirationStatus } from '../../shared/utils/date';
 import { useApplication } from '../providers/ApplicationProvider';
 import { useSession } from '../providers/SessionProvider';
 import { AppRouteKey, ROUTES } from '../router/routes';
@@ -76,6 +77,20 @@ export function Sidebar({ isMobileOpen, onCloseMobile }: SidebarProps) {
         : Promise.resolve([]),
     [useCases.warehouse.getOutOfStockProducts, actor, can, dataRevision]
   );
+
+  const { data: allProducts } = useAsyncQuery(
+    () =>
+      can(Permission.VIEW_PRODUCTS)
+        ? useCases.warehouse.listProducts.execute(actor)
+        : Promise.resolve([]),
+    [useCases.warehouse.listProducts, actor, can, dataRevision]
+  );
+
+  const expiringProducts = useMemo(() => {
+    return (allProducts ?? []).filter(
+      (p) => p.expirationDate && getExpirationStatus(p.expirationDate).isAlert
+    );
+  }, [allProducts]);
 
   const handleNav = (path: string) => {
     navigate(path);
@@ -320,6 +335,23 @@ export function Sidebar({ isMobileOpen, onCloseMobile }: SidebarProps) {
                 <span className="truncate text-[11px]">Sin agotados</span>
               </div>
               <span className="text-[10px] text-slate-400 font-mono">0</span>
+            </button>
+          )}
+
+          {expiringProducts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => handleNav(ROUTES.warehouseProducts)}
+              className="mt-1.5 flex w-full items-center justify-between rounded-lg bg-amber-500/20 border border-amber-500/40 px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/30 transition-colors cursor-pointer shadow-sm"
+              title="Ver artículos con vencimiento ≤ 1 año en Almacén"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+                <span className="truncate">Próximos a vencer</span>
+              </div>
+              <span className="inline-flex shrink-0 items-center justify-center rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-slate-950 font-mono">
+                {expiringProducts.length}
+              </span>
             </button>
           )}
         </div>

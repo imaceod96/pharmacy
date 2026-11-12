@@ -14,6 +14,7 @@ export interface ProductCostLayer extends BaseEntity {
   readonly originalQuantity: number;
   remainingQuantity: number;
   readonly unitPurchaseCost: number;
+  readonly expirationDate?: string | null;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
   readonly auditRef?: string | null;

@@ -28,6 +28,7 @@ export interface RegisterMerchandiseEntryInput {
   readonly unitPurchasePrice: number;
   readonly declaredSalePrice: number;
   readonly declaredEntryDate: string; // YYYY-MM-DD
+  readonly expirationDate?: string | null;
 }
 
 export interface RegisterMerchandiseEntryResult {
@@ -150,12 +151,17 @@ export class RegisterMerchandiseEntryUseCase {
           await tx.insert(StoreName.WAREHOUSE_PRICE_CHANGES, priceChangeRecord);
         }
 
+        const newExpirationDate = input.expirationDate !== undefined && input.expirationDate !== null && input.expirationDate.trim() !== ''
+          ? input.expirationDate.trim()
+          : (product.expirationDate ?? null);
+
         // Actualización inmutable del producto
         const updatedProduct: ProductRecord = {
           ...product,
           currentStock: newStock,
           lastPurchasePrice: input.unitPurchasePrice,
           currentSalePrice: resolvedSalePrice,
+          expirationDate: newExpirationDate,
           updatedAt: timestamp,
         };
         await tx.upsert(StoreName.WAREHOUSE_PRODUCTS, updatedProduct);
@@ -169,6 +175,7 @@ export class RegisterMerchandiseEntryUseCase {
           declaredSalePrice: resolvedSalePrice,
           totalEntryCost,
           declaredEntryDate,
+          expirationDate: input.expirationDate ? input.expirationDate.trim() : null,
           registeredAt: timestamp,
           responsibleUserId: actor.label,
         };
@@ -196,6 +203,7 @@ export class RegisterMerchandiseEntryUseCase {
           originalQuantity: input.receivedQuantity,
           remainingQuantity: input.receivedQuantity,
           unitPurchaseCost: input.unitPurchasePrice,
+          expirationDate: input.expirationDate ? input.expirationDate.trim() : null,
           createdAt: timestamp,
           updatedAt: timestamp,
           auditRef: 'MERCHANDISE_ENTRY',
